@@ -59,5 +59,15 @@ Also make sure your terminal is not including literal `\n` characters at the end
 ## Controls
 
 - Move: `WASD` or Arrow keys
-- Restart after game over: `R`
+- Unlock weapons after 5 seconds of survival
+- Buy/equip weapons: `1`, `2`, `3`
+- Fire equipped weapon: hold `Space`
+- Restart after game over or win: `R`
 
+## Gameplay additions
+
+- **Credits**: gain `+1` per red dot dodged, extra credits for kills.
+- **Weapons**: spend credits to buy stronger weapons.
+- **Levels**: 5 total levels with increasing enemy difficulty.
+- **Boss**: Level 5 spawns the boss enemy.
+- **Leaderboard**: tracks best times this session and best times overall.

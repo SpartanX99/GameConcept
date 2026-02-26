@@ -9,26 +9,70 @@ const player = {
   x: 0,
   y: 0,
   radius: 12,
-  speed: 260,
+  speed: 270,
+  credits: 0,
 };
 
 const reds = [];
+const projectiles = [];
 
 let gameOver = false;
 let hasRecordedGameOver = false;
 let startTime = performance.now();
 let scoreSeconds = 0;
 let lastTime = performance.now();
-let spawnTimer = 0;
 
-const initialSpawnInterval = 900;
-const minSpawnInterval = 260;
-const difficultyRampPerSecond = 12;
+const totalLevels = 5;
+let level = 1;
+let inLevelTransition = false;
+let transitionTimer = 0;
+let spawnTimer = 0;
+let spawnedThisLevel = 0;
+
+let weaponsUnlocked = false;
+const weapons = {
+  pulse: { key: "1", name: "Pulse", cost: 4, damage: 1, speed: 460, cooldownMs: 340, color: "#6ce4ff" },
+  burst: { key: "2", name: "Burst", cost: 10, damage: 2, speed: 540, cooldownMs: 250, color: "#ffe66c" },
+  rail: { key: "3", name: "Rail", cost: 18, damage: 4, speed: 680, cooldownMs: 180, color: "#ff9cf7" },
+};
+const purchasedWeapons = new Set();
+let equippedWeaponKey = null;
+let fireCooldownMs = 0;
 
 const leaderboardKey = "blue-dot-survival-best-overall";
 const leaderboardLimit = 8;
 const sessionBestTimes = [];
 let overallBestTimes = loadOverallBestTimes();
+
+function levelConfig(currentLevel) {
+  if (currentLevel === 5) {
+    return {
+      spawnIntervalMs: 700,
+      spawnCount: 1,
+      speedMin: 55,
+      speedMax: 85,
+      radiusMin: 40,
+      radiusMax: 40,
+      hpMin: 35,
+      hpMax: 35,
+      isBossLevel: true,
+      dodgeLifetime: 99999,
+    };
+  }
+
+  return {
+    spawnIntervalMs: Math.max(220, 900 - currentLevel * 110),
+    spawnCount: 8 + currentLevel * 5,
+    speedMin: 42 + currentLevel * 10,
+    speedMax: 70 + currentLevel * 15,
+    radiusMin: 9,
+    radiusMax: 14 + currentLevel,
+    hpMin: 1,
+    hpMax: 1 + Math.floor(currentLevel / 3),
+    isBossLevel: false,
+    dodgeLifetime: Math.max(3.4, 5.2 - currentLevel * 0.35),
+  };
+}
 
 function resize() {
   canvas.width = window.innerWidth;
@@ -37,8 +81,7 @@ function resize() {
   if (!playerStart.x && !playerStart.y) {
     resetPlayerToCenter();
   } else {
-    player.x = Math.min(canvas.width - player.radius, Math.max(player.radius, player.x));
-    player.y = Math.min(canvas.height - player.radius, Math.max(player.radius, player.y));
+    clampPlayer();
   }
 }
 
@@ -64,7 +107,21 @@ function drawPlayer() {
 function drawRed(red) {
   ctx.beginPath();
   ctx.arc(red.x, red.y, red.radius, 0, Math.PI * 2);
-  ctx.fillStyle = "#ff4b4b";
+  ctx.fillStyle = red.isBoss ? "#b60000" : "#ff4b4b";
+  ctx.fill();
+
+  if (red.hp > 1) {
+    ctx.fillStyle = "#fff";
+    ctx.font = "12px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(`${red.hp}`, red.x, red.y + 4);
+  }
+}
+
+function drawProjectile(projectile) {
+  ctx.beginPath();
+  ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2);
+  ctx.fillStyle = projectile.color;
   ctx.fill();
 }
 
@@ -74,9 +131,7 @@ function clampPlayer() {
 }
 
 function updatePlayer(deltaSeconds) {
-  if (gameOver) {
-    return;
-  }
+  if (gameOver) return;
 
   let moveX = 0;
   let moveY = 0;
@@ -94,7 +149,6 @@ function updatePlayer(deltaSeconds) {
 
   player.x += moveX * player.speed * deltaSeconds;
   player.y += moveY * player.speed * deltaSeconds;
-
   clampPlayer();
 }
 
@@ -104,16 +158,12 @@ function distanceSquared(ax, ay, bx, by) {
   return dx * dx + dy * dy;
 }
 
-function currentSpawnIntervalMs() {
-  const elapsedSeconds = (performance.now() - startTime) / 1000;
-  const reduced = initialSpawnInterval - elapsedSeconds * difficultyRampPerSecond;
-  return Math.max(minSpawnInterval, reduced);
-}
-
 function spawnRed() {
-  const radius = 10 + Math.random() * 6;
-  const speed = 45 + Math.random() * 35;
-  const minDistance = 180;
+  const config = levelConfig(level);
+  const radius = config.radiusMin + Math.random() * (config.radiusMax - config.radiusMin);
+  const speed = config.speedMin + Math.random() * (config.speedMax - config.speedMin);
+  const hp = Math.floor(config.hpMin + Math.random() * (config.hpMax - config.hpMin + 1));
+  const minDistance = level === 5 ? 260 : 180;
   const minDistanceSq = minDistance * minDistance;
 
   let x = 0;
@@ -126,15 +176,18 @@ function spawnRed() {
     attempts += 1;
   } while (attempts < 30 && distanceSquared(x, y, player.x, player.y) < minDistanceSq);
 
-  reds.push({ x, y, radius, speed });
+  reds.push({ x, y, radius, speed, hp, ageSeconds: 0, isBoss: config.isBossLevel });
 }
 
 function updateReds(deltaSeconds) {
-  if (gameOver) {
-    return;
-  }
+  if (gameOver) return;
 
-  for (const red of reds) {
+  const config = levelConfig(level);
+
+  for (let i = reds.length - 1; i >= 0; i -= 1) {
+    const red = reds[i];
+    red.ageSeconds += deltaSeconds;
+
     const toPlayerX = player.x - red.x;
     const toPlayerY = player.y - red.y;
     const len = Math.hypot(toPlayerX, toPlayerY) || 1;
@@ -143,13 +196,91 @@ function updateReds(deltaSeconds) {
 
     red.x += dirX * red.speed * deltaSeconds;
     red.y += dirY * red.speed * deltaSeconds;
+
+    if (!red.isBoss && red.ageSeconds >= config.dodgeLifetime) {
+      reds.splice(i, 1);
+      player.credits += 1;
+    }
+  }
+}
+
+function fireAtNearestEnemy() {
+  if (!equippedWeaponKey || reds.length === 0) return;
+  const weapon = weapons[equippedWeaponKey];
+  if (!weapon || fireCooldownMs > 0) return;
+  if (!keysDown[" "] && !keysDown.Space && !keysDown.space) return;
+
+  let nearest = null;
+  let nearestDistSq = Infinity;
+  for (const red of reds) {
+    const d2 = distanceSquared(player.x, player.y, red.x, red.y);
+    if (d2 < nearestDistSq) {
+      nearestDistSq = d2;
+      nearest = red;
+    }
+  }
+
+  if (!nearest) return;
+
+  const dx = nearest.x - player.x;
+  const dy = nearest.y - player.y;
+  const len = Math.hypot(dx, dy) || 1;
+
+  projectiles.push({
+    x: player.x,
+    y: player.y,
+    vx: (dx / len) * weapon.speed,
+    vy: (dy / len) * weapon.speed,
+    damage: weapon.damage,
+    radius: 4,
+    color: weapon.color,
+    ttl: 1.6,
+  });
+
+  fireCooldownMs = weapon.cooldownMs;
+}
+
+function updateProjectiles(deltaSeconds) {
+  for (let i = projectiles.length - 1; i >= 0; i -= 1) {
+    const projectile = projectiles[i];
+    projectile.ttl -= deltaSeconds;
+    projectile.x += projectile.vx * deltaSeconds;
+    projectile.y += projectile.vy * deltaSeconds;
+
+    if (
+      projectile.ttl <= 0 ||
+      projectile.x < -20 ||
+      projectile.y < -20 ||
+      projectile.x > canvas.width + 20 ||
+      projectile.y > canvas.height + 20
+    ) {
+      projectiles.splice(i, 1);
+      continue;
+    }
+
+    let hit = false;
+    for (let r = reds.length - 1; r >= 0; r -= 1) {
+      const red = reds[r];
+      const sumR = red.radius + projectile.radius;
+      if (distanceSquared(projectile.x, projectile.y, red.x, red.y) < sumR * sumR) {
+        red.hp -= projectile.damage;
+        hit = true;
+        if (red.hp <= 0) {
+          reds.splice(r, 1);
+          player.credits += red.isBoss ? 12 : 2;
+        }
+        break;
+      }
+    }
+
+    if (hit) {
+      projectiles.splice(i, 1);
+    }
   }
 }
 
 function checkCollisions() {
-  if (gameOver) {
-    return;
-  }
+  if (gameOver) return;
 
   for (const red of reds) {
     const sumR = red.radius + player.radius;
@@ -160,20 +291,100 @@ function checkCollisions() {
   }
 }
 
+function tryUnlockWeapons() {
+  if (!weaponsUnlocked && scoreSeconds >= 5) {
+    weaponsUnlocked = true;
+  }
+}
+
+function tryBuyOrEquipWeapon(key) {
+  if (!weaponsUnlocked || gameOver) return;
+
+  const weaponEntry = Object.entries(weapons).find(([, weapon]) => weapon.key === key);
+  if (!weaponEntry) return;
+
+  const [weaponId, weapon] = weaponEntry;
+
+  if (!purchasedWeapons.has(weaponId)) {
+    if (player.credits < weapon.cost) return;
+    player.credits -= weapon.cost;
+    purchasedWeapons.add(weaponId);
+  }
+
+  equippedWeaponKey = weaponId;
+}
+
+function updateLevelFlow(deltaMs) {
+  if (gameOver) return;
+
+  if (inLevelTransition) {
+    transitionTimer -= deltaMs;
+    if (transitionTimer <= 0) {
+      inLevelTransition = false;
+      spawnTimer = 0;
+      spawnedThisLevel = 0;
+    }
+    return;
+  }
+
+  const config = levelConfig(level);
+
+  if (spawnedThisLevel < config.spawnCount) {
+    spawnTimer += deltaMs;
+    while (spawnTimer >= config.spawnIntervalMs && spawnedThisLevel < config.spawnCount) {
+      spawnTimer -= config.spawnIntervalMs;
+      spawnRed();
+      spawnedThisLevel += 1;
+    }
+  }
+
+  if (spawnedThisLevel >= config.spawnCount && reds.length === 0) {
+    if (level >= totalLevels) {
+      gameOver = true;
+      return;
+    }
+
+    level += 1;
+    inLevelTransition = true;
+    transitionTimer = 1800;
+    spawnTimer = 0;
+    spawnedThisLevel = 0;
+  }
+}
+
 function drawHud() {
   ctx.fillStyle = "#f0f0f0";
   ctx.font = "bold 22px Arial";
   ctx.textAlign = "left";
   ctx.fillText(`Time: ${scoreSeconds.toFixed(1)}s`, 18, 34);
+
   ctx.font = "16px Arial";
   ctx.fillStyle = "#cfcfcf";
-  ctx.fillText("Move: Arrow Keys / WASD", 18, 58);
+  ctx.fillText(`Level: ${level}/${totalLevels}`, 18, 58);
+  ctx.fillText(`Credits: ${player.credits}`, 18, 80);
+  ctx.fillText("Move: Arrow Keys / WASD", 18, 102);
+
+  if (!weaponsUnlocked) {
+    ctx.fillStyle = "#ffd36c";
+    ctx.fillText("Weapons unlock at 5s survival", 18, 124);
+  } else {
+    const equippedName = equippedWeaponKey ? weapons[equippedWeaponKey].name : "None";
+    ctx.fillStyle = "#9cd0ff";
+    ctx.fillText(`Equipped: ${equippedName} (Hold Space to fire)`, 18, 124);
+    ctx.fillStyle = "#f6f6f6";
+    ctx.fillText("Buy/Equip: 1 Pulse(4)  2 Burst(10)  3 Rail(18)", 18, 146);
+  }
+
+  if (inLevelTransition) {
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.font = "bold 38px Arial";
+    ctx.fillText(`Level ${level}`, canvas.width / 2, 84);
+  }
 }
 
 function drawGameOverOverlay() {
-  if (!gameOver) {
-    return;
-  }
+  if (!gameOver) return;
 
   ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -181,33 +392,30 @@ function drawGameOverOverlay() {
   ctx.fillStyle = "#ffffff";
   ctx.textAlign = "center";
   ctx.font = "bold 46px Arial";
-  ctx.fillText("Game Over", canvas.width / 2, canvas.height / 2 - 16);
+  const title = level >= totalLevels && reds.length === 0 ? "You Win!" : "Game Over";
+  ctx.fillText(title, canvas.width / 2, canvas.height / 2 - 16);
   ctx.font = "24px Arial";
   ctx.fillText("Press R to Restart", canvas.width / 2, canvas.height / 2 + 28);
 }
 
 function restartGame() {
   reds.length = 0;
+  projectiles.length = 0;
   gameOver = false;
   hasRecordedGameOver = false;
   scoreSeconds = 0;
   startTime = performance.now();
+  level = 1;
+  inLevelTransition = false;
+  transitionTimer = 0;
   spawnTimer = 0;
+  spawnedThisLevel = 0;
+  player.credits = 0;
+  weaponsUnlocked = false;
+  purchasedWeapons.clear();
+  equippedWeaponKey = null;
+  fireCooldownMs = 0;
   resetPlayerToCenter();
-}
-
-function updateSpawning(deltaMs) {
-  if (gameOver) {
-    return;
-  }
-
-  spawnTimer += deltaMs;
-  const interval = currentSpawnIntervalMs();
-
-  while (spawnTimer >= interval) {
-    spawnTimer -= interval;
-    spawnRed();
-  }
 }
 
 function sortBestTimes(times) {
@@ -225,14 +433,10 @@ function saveOverallBestTimes() {
 function loadOverallBestTimes() {
   try {
     const raw = localStorage.getItem(leaderboardKey);
-    if (!raw) {
-      return [];
-    }
+    if (!raw) return [];
 
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
+    if (!Array.isArray(parsed)) return [];
 
     return sortBestTimes(parsed.filter((value) => Number.isFinite(value) && value > 0));
   } catch (_error) {
@@ -241,25 +445,18 @@ function loadOverallBestTimes() {
 }
 
 function formatScore(timeSeconds) {
-  if (typeof timeSeconds !== "number") {
-    return "-";
-  }
-
+  if (typeof timeSeconds !== "number") return "-";
   return `${timeSeconds.toFixed(1)}s`;
 }
 
 function renderLeaderboard() {
   leaderboardRows.innerHTML = "";
-
   for (let i = 0; i < leaderboardLimit; i += 1) {
     const row = document.createElement("tr");
-
     const sessionCell = document.createElement("td");
-    sessionCell.textContent = formatScore(sessionBestTimes[i]);
-
     const overallCell = document.createElement("td");
+    sessionCell.textContent = formatScore(sessionBestTimes[i]);
     overallCell.textContent = formatScore(overallBestTimes[i]);
-
     row.appendChild(sessionCell);
     row.appendChild(overallCell);
     leaderboardRows.appendChild(row);
@@ -268,9 +465,7 @@ function renderLeaderboard() {
 
 function recordCompletedRun() {
   const finalScore = Number(scoreSeconds.toFixed(1));
-  if (!Number.isFinite(finalScore) || finalScore <= 0) {
-    return;
-  }
+  if (!Number.isFinite(finalScore) || finalScore <= 0) return;
 
   sessionBestTimes.push(finalScore);
   const sortedSession = sortBestTimes(sessionBestTimes);
@@ -291,8 +486,13 @@ function loop(now) {
     scoreSeconds = (now - startTime) / 1000;
   }
 
+  fireCooldownMs = Math.max(0, fireCooldownMs - deltaMs);
+
   updatePlayer(deltaSeconds);
-  updateSpawning(deltaMs);
+  tryUnlockWeapons();
+  updateLevelFlow(deltaMs);
+  fireAtNearestEnemy();
+  updateProjectiles(deltaSeconds);
   updateReds(deltaSeconds);
   checkCollisions();
 
@@ -304,6 +504,7 @@ function loop(now) {
   clearScreen();
   drawPlayer();
   reds.forEach(drawRed);
+  projectiles.forEach(drawProjectile);
   drawHud();
   drawGameOverOverlay();
 
@@ -313,6 +514,10 @@ function loop(now) {
 window.addEventListener("keydown", (event) => {
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   keysDown[key] = true;
+
+  if (key === "1" || key === "2" || key === "3") {
+    tryBuyOrEquipWeapon(key);
+  }
 
   if ((key === "r" || key === "R") && gameOver) {
     restartGame();

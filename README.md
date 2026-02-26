@@ -74,3 +74,23 @@ Also make sure your terminal is not including literal `\n` characters at the end
 - **Leaderboard**: shows only best time this session and best overall time.
 - **Enemy evolution**: after each boss tier, regular reds gain armor and more shooter behavior.
 - **Health system**: blue dot has a full health bar that resets each level.
+
+
+## Deploy to GitHub Pages
+
+This repo includes a GitHub Actions workflow at `.github/workflows/deploy-pages.yml` that deploys the static game site to GitHub Pages.
+
+### One-time setup
+1. Push this repository to GitHub.
+2. In GitHub, open **Settings → Pages**.
+3. Under **Build and deployment**, set **Source** to **GitHub Actions**.
+4. Ensure your default branch is `main` (or update the workflow branch trigger if needed).
+
+### Deploy
+- Automatic deploy runs on every push to `main`.
+- You can also run it manually from **Actions → Deploy static site to GitHub Pages → Run workflow**.
+
+### Public URL
+After first successful run, your game is available at:
+- `https://<your-username>.github.io/<repo-name>/`
+

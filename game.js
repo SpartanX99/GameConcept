@@ -298,6 +298,18 @@ function resize() {
   clampPlayer();
 }
 
+
+function beginPlayableClip() {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, playArea.top, canvas.width, Math.max(1, canvas.height - playArea.top - playArea.bottom));
+  ctx.clip();
+}
+
+function endPlayableClip() {
+  ctx.restore();
+}
+
 function clearScreen() {
   const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
   gradient.addColorStop(0, "#151925");
@@ -1093,6 +1105,8 @@ function togglePause(now) {
 }
 
 function loop(now) {
+  updatePlayArea();
+
   const deltaMs = Math.min(48, now - lastTime);
   const deltaSeconds = deltaMs / 1000;
   lastTime = now;
@@ -1124,13 +1138,16 @@ function loop(now) {
   }
 
   clearScreen();
+  beginPlayableClip();
   drawPlayer();
   reds.forEach(drawRed);
   healthDrops.forEach(drawHealthDrop);
+  powerUpDrops.forEach(drawPowerUpDrop);
   projectiles.forEach(drawProjectile);
   enemyProjectiles.forEach(drawEnemyProjectile);
   shotEffects.forEach(drawShotEffect);
   hitEffects.forEach(drawHitEffect);
+  endPlayableClip();
 
   updateUiText();
   drawOverlayMessage();

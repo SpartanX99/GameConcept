@@ -29,7 +29,11 @@ const player = {
 const reds = [];
 const projectiles = [];
 const enemyProjectiles = [];
+const shotEffects = [];
+const hitEffects = [];
+const healthDrops = [];
 const playArea = { top: 0, bottom: 0 };
+const aim = { x: 0, y: 0, active: false };
 
 let gameOver = false;
 let paused = false;
@@ -46,6 +50,7 @@ let inLevelTransition = false;
 let transitionTimer = 0;
 let spawnTimer = 0;
 let spawnedThisLevel = 0;
+let healthDropTimer = 0;
 
 let weaponsUnlocked = false;
 const weapons = [
@@ -72,61 +77,74 @@ let sessionBestTime = null;
 let overallBestTime = overallBestTimes[0] ?? null;
 
 function isBossLevel(currentLevel) {
-  return currentLevel % 5 === 0;
+  return currentLevel % 3 === 0;
 }
 
 function currentBossTier() {
-  return Math.floor((level - 1) / 5);
+  return Math.floor((level - 1) / 3);
 }
 
 function levelConfig(currentLevel) {
-  const tier = Math.floor((currentLevel - 1) / 5);
+  const tier = Math.floor((currentLevel - 1) / 3);
 
   if (isBossLevel(currentLevel)) {
+    const bossNumber = Math.floor(currentLevel / 3);
+    const shieldLayers = Math.min(64, 2 ** (bossNumber - 1));
+    const shieldHpPerLayer = 16 + tier * 10;
+    const totalShieldHp = shieldLayers * shieldHpPerLayer;
+
     return {
-      spawnIntervalMs: Math.max(130, 670 - tier * 30),
+      spawnIntervalMs: Math.max(110, 600 - tier * 26),
       spawnCount: 1,
       speedMin: 72 + tier * 9,
       speedMax: 95 + tier * 11,
       radiusMin: Math.min(62, 35 + tier * 3),
       radiusMax: Math.min(62, 35 + tier * 3),
-      hpMin: 42 + tier * 18,
-      hpMax: 42 + tier * 18,
-      armor: Math.min(10, 2 + tier),
+      hpMin: (42 + tier * 18) * 10,
+      hpMax: (42 + tier * 18) * 10,
+      armor: Math.min(30, (2 + tier) * 3),
       isBossLevel: true,
       dodgeLifetime: 99999,
-      shooterChance: 0.9,
-      enemyShotCooldownMinMs: 850,
-      enemyShotCooldownMaxMs: 1300,
-      enemyShotSpeed: 190 + tier * 9,
-      enemyContactDamage: 24 + tier * 3,
-      enemyShotDamage: 10 + tier * 2,
+      shooterChance: 0.95,
+      enemyShotCooldownMinMs: 260,
+      enemyShotCooldownMaxMs: 520,
+      enemyShotSpeed: 280 + tier * 16,
+      enemyContactDamage: 42 + tier * 6,
+      enemyShotDamage: 18 + tier * 3,
+      bossArmorLayer: 55 + tier * 26,
+      shieldLayers,
+      shieldHpPerLayer,
+      totalShieldHp,
     };
   }
 
   return {
-    spawnIntervalMs: Math.max(100, 860 - currentLevel * 20),
+    spawnIntervalMs: Math.max(90, 830 - currentLevel * 22),
     spawnCount: 9 + currentLevel * 4,
-    speedMin: 48 + currentLevel * 2.8,
-    speedMax: 72 + currentLevel * 4.2,
+    speedMin: 50 + currentLevel * 3,
+    speedMax: 76 + currentLevel * 4.5,
     radiusMin: 9,
     radiusMax: Math.min(24, 13 + currentLevel * 0.4),
-    hpMin: 1 + Math.floor(tier * 0.7),
-    hpMax: 2 + Math.floor(currentLevel / 7) + tier,
-    armor: Math.min(8, tier),
+    hpMin: 1 + Math.floor(tier * 0.9),
+    hpMax: 2 + Math.floor(currentLevel / 6) + tier,
+    armor: Math.min(10, tier),
     isBossLevel: false,
     dodgeLifetime: Math.max(1.2, 4.6 - currentLevel * 0.07),
-    shooterChance: Math.min(0.62, 0.06 + tier * 0.11),
-    enemyShotCooldownMinMs: Math.max(750, 1900 - tier * 170),
-    enemyShotCooldownMaxMs: Math.max(1200, 2700 - tier * 180),
-    enemyShotSpeed: 160 + tier * 8,
+    shooterChance: Math.min(0.85, 0.2 + tier * 0.16),
+    enemyShotCooldownMinMs: Math.max(360, 900 - tier * 110),
+    enemyShotCooldownMaxMs: Math.max(560, 1320 - tier * 120),
+    enemyShotSpeed: 235 + tier * 12,
     enemyContactDamage: 12 + tier * 2,
     enemyShotDamage: 5 + tier,
+    bossArmorLayer: 0,
+    shieldLayers: 0,
+    shieldHpPerLayer: 0,
+    totalShieldHp: 0,
   };
 }
 
 function maxHealthForLevel(currentLevel) {
-  const tier = Math.floor((currentLevel - 1) / 5);
+  const tier = Math.floor((currentLevel - 1) / 3);
   return 100 + tier * 18;
 }
 
@@ -201,6 +219,15 @@ function drawRed(red) {
   ctx.fillStyle = red.isBoss ? "#8b0b0b" : "#ff4b4b";
   ctx.fill();
 
+  if (red.isBoss && red.shieldLayers > 0) {
+    const shieldPct = red.currentShieldLayerHp / Math.max(1, red.shieldHpPerLayer);
+    ctx.strokeStyle = "#72d7ff";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(red.x, red.y, red.radius + 12, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * shieldPct);
+    ctx.stroke();
+  }
+
   if (red.isBoss && red.bossArmor > 0) {
     const armorPct = red.bossArmor / Math.max(1, red.bossArmorMax);
     ctx.strokeStyle = "#9fe7ff";
@@ -214,16 +241,46 @@ function drawRed(red) {
     ctx.fillStyle = "#fff";
     ctx.font = "12px Arial";
     ctx.textAlign = "center";
-    const hpText = red.isBoss && red.bossArmor > 0 ? `A:${Math.ceil(red.bossArmor)}` : `${Math.ceil(red.hp)}`;
+    let hpText = `${Math.ceil(red.hp)}`;
+    if (red.isBoss && red.shieldLayers > 0) hpText = `S:${red.shieldLayers}`;
+    else if (red.isBoss && red.bossArmor > 0) hpText = `A:${Math.ceil(red.bossArmor)}`;
     ctx.fillText(hpText, red.x, red.y + 4);
   }
 }
 
 function drawProjectile(projectile) {
+  const weapon = getWeaponById(projectile.weaponId);
+  const pulse = Math.sin(performance.now() * 0.02 + (projectile.phase || 0)) * 0.8;
+  const sizeBoost = weapon ? Math.max(0, weapon.damage * 0.08) : 0;
+
   ctx.beginPath();
-  ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2);
+  ctx.arc(projectile.x, projectile.y, projectile.radius + sizeBoost + pulse, 0, Math.PI * 2);
   ctx.fillStyle = projectile.color;
   ctx.fill();
+
+  if (weapon) {
+    if (["pulse", "ion", "omega"].includes(weapon.id)) {
+      ctx.globalAlpha = 0.45;
+      ctx.beginPath();
+      ctx.arc(projectile.x - projectile.vx * 0.014, projectile.y - projectile.vy * 0.014, projectile.radius + 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = weapon.color;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    } else if (["rail", "void"].includes(weapon.id)) {
+      ctx.strokeStyle = weapon.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(projectile.x, projectile.y);
+      ctx.lineTo(projectile.x - projectile.vx * 0.02, projectile.y - projectile.vy * 0.02);
+      ctx.stroke();
+    } else {
+      ctx.strokeStyle = weapon.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(projectile.x, projectile.y, projectile.radius + 2.2, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
 }
 
 function drawEnemyProjectile(projectile) {
@@ -271,12 +328,63 @@ function randomBetween(min, max) {
   return min + Math.random() * (max - min);
 }
 
+
+function spawnHealthDrop() {
+  const radius = 9;
+  const minY = playableMinY(radius);
+  const maxY = playableMaxY(radius);
+  const x = radius + Math.random() * (canvas.width - radius * 2);
+  const y = minY + Math.random() * Math.max(1, maxY - minY);
+  const healAmount = 12 + Math.floor(Math.random() * 10);
+
+  healthDrops.push({ x, y, radius, healAmount, ttl: 7.5, phase: Math.random() * Math.PI * 2 });
+}
+
+function updateHealthDrops(deltaSeconds) {
+  if (paused || gameOver) return;
+
+  for (let i = healthDrops.length - 1; i >= 0; i -= 1) {
+    const drop = healthDrops[i];
+    drop.ttl -= deltaSeconds;
+
+    if (drop.ttl <= 0) {
+      healthDrops.splice(i, 1);
+      continue;
+    }
+
+    const sumR = drop.radius + player.radius;
+    if (distanceSquared(drop.x, drop.y, player.x, player.y) < sumR * sumR) {
+      player.health = Math.min(player.maxHealth, player.health + drop.healAmount);
+      addHitEffect(drop.x, drop.y, "#7dffb4", "heal");
+      healthDrops.splice(i, 1);
+    }
+  }
+}
+
+function drawHealthDrop(drop) {
+  const pulse = Math.sin(performance.now() * 0.01 + drop.phase) * 1.2;
+  ctx.beginPath();
+  ctx.arc(drop.x, drop.y, drop.radius + pulse, 0, Math.PI * 2);
+  ctx.fillStyle = "#6cff9b";
+  ctx.fill();
+
+  ctx.strokeStyle = "#e8fff2";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(drop.x - 4, drop.y);
+  ctx.lineTo(drop.x + 4, drop.y);
+  ctx.moveTo(drop.x, drop.y - 4);
+  ctx.lineTo(drop.x, drop.y + 4);
+  ctx.stroke();
+}
+
 function spawnRed() {
   const config = levelConfig(level);
+  const isAnyBoss = config.isBossLevel;
   const radius = randomBetween(config.radiusMin, config.radiusMax);
   const speed = randomBetween(config.speedMin, config.speedMax);
   const hp = Math.floor(randomBetween(config.hpMin, config.hpMax + 1));
-  const minDistance = config.isBossLevel ? 260 : 180;
+  const minDistance = isAnyBoss ? 250 : 180;
   const minDistanceSq = minDistance * minDistance;
 
   let x = 0;
@@ -291,7 +399,7 @@ function spawnRed() {
   } while (attempts < 30 && distanceSquared(x, y, player.x, player.y) < minDistanceSq);
 
   const canShoot = Math.random() < config.shooterChance;
-  const bossArmorMax = config.isBossLevel ? 24 + currentBossTier() * 14 : 0;
+  const bossArmorMax = config.bossArmorLayer || 0;
 
   reds.push({
     x,
@@ -303,7 +411,11 @@ function spawnRed() {
     bossArmor: bossArmorMax,
     bossArmorMax,
     ageSeconds: 0,
-    isBoss: config.isBossLevel,
+    isBoss: isAnyBoss,
+    isMainBoss: config.isBossLevel,
+    shieldLayers: config.shieldLayers || 0,
+    shieldHpPerLayer: config.shieldHpPerLayer || 0,
+    currentShieldLayerHp: config.shieldHpPerLayer || 0,
     canShoot,
     shotCooldownMs: randomBetween(config.enemyShotCooldownMinMs, config.enemyShotCooldownMaxMs),
   });
@@ -369,38 +481,45 @@ function getWeaponByKey(key) {
   return weapons.find((weapon) => weapon.key === key) || null;
 }
 
+function getAimDirection() {
+  const targetX = aim.active ? aim.x : player.x + 1;
+  const targetY = aim.active ? aim.y : player.y;
+  const dx = targetX - player.x;
+  const dy = targetY - player.y;
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: dx / len, y: dy / len };
+}
+
+function addShotEffect(x, y, color, weaponId) {
+  shotEffects.push({ x, y, color, weaponId, life: 0.12, ttl: 0.12 });
+}
+
+function addHitEffect(x, y, color, weaponId) {
+  hitEffects.push({ x, y, color, weaponId, life: 0.22, ttl: 0.22 });
+}
+
 function fireAtNearestEnemy() {
-  if (gameOver || paused || !equippedWeaponId || reds.length === 0) return;
+  if (gameOver || paused || !equippedWeaponId) return;
   const weapon = getWeaponById(equippedWeaponId);
   if (!weapon || fireCooldownMs > 0) return;
   if (!keysDown[" "] && !keysDown.Space && !keysDown.space) return;
 
-  let nearest = null;
-  let nearestDistSq = Infinity;
-  for (const red of reds) {
-    const d2 = distanceSquared(player.x, player.y, red.x, red.y);
-    if (d2 < nearestDistSq) {
-      nearestDistSq = d2;
-      nearest = red;
-    }
-  }
-  if (!nearest) return;
-
-  const dx = nearest.x - player.x;
-  const dy = nearest.y - player.y;
-  const len = Math.hypot(dx, dy) || 1;
+  const dir = getAimDirection();
 
   projectiles.push({
     x: player.x,
     y: player.y,
-    vx: (dx / len) * weapon.speed,
-    vy: (dy / len) * weapon.speed,
+    vx: dir.x * weapon.speed,
+    vy: dir.y * weapon.speed,
     damage: weapon.damage,
-    radius: 4,
+    radius: 4 + weapon.damage * 0.04,
     color: weapon.color,
     ttl: 1.8,
+    weaponId: weapon.id,
+    phase: Math.random() * Math.PI * 2,
   });
 
+  addShotEffect(player.x + dir.x * 12, player.y + dir.y * 12, weapon.color, weapon.id);
   fireCooldownMs = weapon.cooldownMs;
 }
 
@@ -429,12 +548,21 @@ function updateProjectiles(deltaSeconds) {
       const red = reds[r];
       const sumR = red.radius + projectile.radius;
       if (distanceSquared(projectile.x, projectile.y, red.x, red.y) < sumR * sumR) {
-        let effectiveDamage = Math.max(0.5, projectile.damage - red.armor * 0.3);
+        const effectiveDamage = Math.max(0.5, projectile.damage - red.armor * 0.3);
 
-        if (red.isBoss && red.bossArmor > 0) {
+        if (red.isBoss && red.shieldLayers > 0) {
+          red.currentShieldLayerHp -= effectiveDamage;
+          if (red.currentShieldLayerHp <= 0) {
+            red.shieldLayers -= 1;
+            red.currentShieldLayerHp = red.shieldLayers > 0 ? red.shieldHpPerLayer : 0;
+          }
+          addHitEffect(projectile.x, projectile.y, "#6ed2ff", projectile.weaponId);
+        } else if (red.isBoss && red.bossArmor > 0) {
           red.bossArmor = Math.max(0, red.bossArmor - effectiveDamage);
+          addHitEffect(projectile.x, projectile.y, "#9fe7ff", projectile.weaponId);
         } else {
           red.hp -= effectiveDamage;
+          addHitEffect(projectile.x, projectile.y, projectile.color, projectile.weaponId);
         }
 
         hit = true;
@@ -531,12 +659,22 @@ function updateLevelFlow(deltaMs) {
       inLevelTransition = false;
       spawnTimer = 0;
       spawnedThisLevel = 0;
-      resetHealthForLevel();
+  healthDropTimer = 0;
     }
     return;
   }
 
   const config = levelConfig(level);
+
+  healthDropTimer += deltaMs;
+  const nextDropMs = 3800 + Math.random() * 2300;
+  if (healthDropTimer >= nextDropMs) {
+    healthDropTimer = 0;
+    if (healthDrops.length < 2) {
+      spawnHealthDrop();
+    }
+  }
+
   if (spawnedThisLevel < config.spawnCount) {
     spawnTimer += deltaMs;
     while (spawnTimer >= config.spawnIntervalMs && spawnedThisLevel < config.spawnCount) {
@@ -558,6 +696,10 @@ function updateLevelFlow(deltaMs) {
     spawnedThisLevel = 0;
     projectiles.length = 0;
     enemyProjectiles.length = 0;
+    healthDrops.length = 0;
+    healthDropTimer = 0;
+  shotEffects.length = 0;
+  hitEffects.length = 0;
   }
 }
 
@@ -625,12 +767,58 @@ function updateUiText() {
   } else if (!weaponsUnlocked) {
     uiHint.textContent = "Survive 5s to unlock weapon purchases.";
   } else {
-    uiHint.textContent = "Press 1-9 to buy/equip weapons. Hold Space to fire. Bosses every 5 levels increase enemy armor + firepower.";
+    uiHint.textContent = "Press 1-9 to buy/equip weapons. Aim with mouse, hold Space to fire, and collect green health drops.";
   }
 
   updateWeaponPanel();
 }
 
+
+function updateEffects(deltaSeconds) {
+  for (let i = shotEffects.length - 1; i >= 0; i -= 1) {
+    shotEffects[i].ttl -= deltaSeconds;
+    if (shotEffects[i].ttl <= 0) shotEffects.splice(i, 1);
+  }
+
+  for (let i = hitEffects.length - 1; i >= 0; i -= 1) {
+    hitEffects[i].ttl -= deltaSeconds;
+    if (hitEffects[i].ttl <= 0) hitEffects.splice(i, 1);
+  }
+}
+
+function drawShotEffect(effect) {
+  const t = effect.ttl / effect.life;
+  const radius = 8 + (1 - t) * 18;
+  ctx.globalAlpha = Math.max(0, t);
+  ctx.beginPath();
+  ctx.arc(effect.x, effect.y, radius, 0, Math.PI * 2);
+  ctx.fillStyle = effect.color;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+function drawHitEffect(effect) {
+  const t = effect.ttl / effect.life;
+  const spikesByWeapon = { pulse: 6, burst: 7, rail: 10, flare: 8, ion: 9, arc: 11, nova: 12, void: 13, omega: 14 };
+  const spikes = spikesByWeapon[effect.weaponId] || 8;
+  ctx.save();
+  ctx.translate(effect.x, effect.y);
+  ctx.rotate((1 - t) * 0.8);
+  ctx.strokeStyle = effect.color;
+  ctx.globalAlpha = Math.max(0, t);
+  ctx.lineWidth = 2;
+  for (let i = 0; i < spikes; i += 1) {
+    const a = (Math.PI * 2 * i) / spikes;
+    const r1 = 4 + (1 - t) * 6;
+    const r2 = 10 + (1 - t) * 22;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1);
+    ctx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2);
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
 function drawOverlayMessage() {
   if (paused || gameOver || inLevelTransition) {
     ctx.fillStyle = "rgba(0,0,0,0.48)";
@@ -641,7 +829,8 @@ function drawOverlayMessage() {
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.font = "bold 40px Arial";
-    ctx.fillText(isBossLevel(level) ? `BOSS LEVEL ${level}` : `Level ${level}`, canvas.width / 2, canvas.height / 2);
+    const transitionLabel = isBossLevel(level) ? `BOSS LEVEL ${level}` : `Level ${level}`;
+    ctx.fillText(transitionLabel, canvas.width / 2, canvas.height / 2);
   }
 
   if (paused && !gameOver) {
@@ -667,6 +856,9 @@ function restartGame() {
   reds.length = 0;
   projectiles.length = 0;
   enemyProjectiles.length = 0;
+  shotEffects.length = 0;
+  hitEffects.length = 0;
+  healthDrops.length = 0;
 
   gameOver = false;
   paused = false;
@@ -788,6 +980,8 @@ function loop(now) {
     updateProjectiles(deltaSeconds);
     updateEnemyProjectiles(deltaSeconds);
     updateReds(deltaSeconds, deltaMs);
+    updateHealthDrops(deltaSeconds);
+    updateEffects(deltaSeconds);
     checkCollisions();
   }
 
@@ -799,8 +993,11 @@ function loop(now) {
   clearScreen();
   drawPlayer();
   reds.forEach(drawRed);
+  healthDrops.forEach(drawHealthDrop);
   projectiles.forEach(drawProjectile);
   enemyProjectiles.forEach(drawEnemyProjectile);
+  shotEffects.forEach(drawShotEffect);
+  hitEffects.forEach(drawHitEffect);
 
   updateUiText();
   drawOverlayMessage();
@@ -829,6 +1026,13 @@ window.addEventListener("keydown", (event) => {
 window.addEventListener("keyup", (event) => {
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   delete keysDown[key];
+});
+
+window.addEventListener("mousemove", (event) => {
+  const rect = canvas.getBoundingClientRect();
+  aim.x = event.clientX - rect.left;
+  aim.y = event.clientY - rect.top;
+  aim.active = true;
 });
 
 window.addEventListener("resize", resize);

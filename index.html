@@ -11,7 +11,7 @@
 
     <div class="top-strip">
       <section class="hud-panel" aria-label="Game status">
-        <h1>Blue Dot Survival</h1>
+        <h1 id="hudTitle">Blue Dot Survival</h1>
         <div class="hud-grid">
           <span>Time</span><strong id="uiTime">0.0s</strong>
           <span>Level</span><strong id="uiLevel">1</strong>
@@ -61,6 +61,46 @@
         </thead>
         <tbody id="weaponRows"></tbody>
       </table>
+    </section>
+
+    <section id="menuOverlay" class="menu-overlay">
+      <div class="menu-card" data-screen="start">
+        <h2>Blue Dot Survival</h2>
+        <label>
+          Player Name
+          <input id="nameInput" type="text" maxlength="24" placeholder="Enter your name" />
+        </label>
+        <p class="menu-note">Please read the rules before starting.</p>
+        <div class="menu-actions">
+          <button id="startBtn">Start</button>
+          <button id="menuLeaderboardBtn">Leaderboard</button>
+          <button id="rulesBtn">Rules</button>
+        </div>
+      </div>
+
+      <div class="menu-card hidden" data-screen="leaderboard">
+        <h2>Leaderboard</h2>
+        <p>Session Best: <strong id="menuLeaderboardSession">-</strong></p>
+        <p>Overall Best: <strong id="menuLeaderboardOverall">-</strong></p>
+        <div class="menu-actions">
+          <button class="backToMenuBtn">Back</button>
+        </div>
+      </div>
+
+      <div class="menu-card hidden" data-screen="rules">
+        <h2>How to Play</h2>
+        <ul>
+          <li>Move with WASD or Arrow keys.</li>
+          <li>Aim with mouse.</li>
+          <li>Fire with Space or Left Mouse Button.</li>
+          <li>Use power-up with Right Mouse Button.</li>
+          <li>Press B to open/close Armory (game pauses while open).</li>
+        </ul>
+        <div class="menu-actions">
+          <button id="acceptRulesBtn">I Understand</button>
+          <button class="backToMenuBtn">Back</button>
+        </div>
+      </div>
     </section>
 
     <script src="game.js"></script>

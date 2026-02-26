@@ -12,6 +12,17 @@ const uiHealthText = document.getElementById("uiHealthText");
 const uiHealthFill = document.getElementById("uiHealthFill");
 const topStrip = document.querySelector(".top-strip");
 const weaponsPanel = document.querySelector(".weapons-panel");
+const menuOverlay = document.getElementById("menuOverlay");
+const menuCards = Array.from(document.querySelectorAll(".menu-card"));
+const nameInput = document.getElementById("nameInput");
+const startBtn = document.getElementById("startBtn");
+const menuLeaderboardBtn = document.getElementById("menuLeaderboardBtn");
+const rulesBtn = document.getElementById("rulesBtn");
+const acceptRulesBtn = document.getElementById("acceptRulesBtn");
+const backToMenuBtns = Array.from(document.querySelectorAll(".backToMenuBtn"));
+const menuLeaderboardSession = document.getElementById("menuLeaderboardSession");
+const menuLeaderboardOverall = document.getElementById("menuLeaderboardOverall");
+const hudTitle = document.getElementById("hudTitle");
 
 const keysDown = Object.create(null);
 
@@ -38,6 +49,10 @@ let mouseFiring = false;
 
 let gameOver = false;
 let paused = false;
+let armoryOpen = false;
+let menuScreen = "start";
+let hasReadRules = false;
+let playerName = "Player";
 let hasRecordedGameOver = false;
 let pauseStartedAt = 0;
 let totalPausedMs = 0;
@@ -52,6 +67,8 @@ let transitionTimer = 0;
 let spawnTimer = 0;
 let spawnedThisLevel = 0;
 let healthDropTimer = 0;
+const powerUpDrops = [];
+const powerUpInventory = { pulse: 0, nova: 0 };
 
 let weaponsUnlocked = false;
 const weapons = [
@@ -147,6 +164,103 @@ function levelConfig(currentLevel) {
 function maxHealthForLevel(currentLevel) {
   const tier = Math.floor((currentLevel - 1) / 3);
   return 100 + tier * 18;
+}
+
+
+function showMenu(screen) {
+  menuScreen = screen;
+  menuOverlay.classList.toggle("hidden", screen === "none");
+  menuCards.forEach((card) => card.classList.toggle("hidden", card.dataset.screen !== screen));
+  menuLeaderboardSession.textContent = formatScore(sessionBestTime);
+  menuLeaderboardOverall.textContent = formatScore(overallBestTime);
+}
+
+function setArmoryOpen(open) {
+  armoryOpen = open;
+  weaponsPanel.classList.toggle("visible", armoryOpen);
+}
+
+function spawnPowerUpDrop() {
+  const types = ["pulse", "nova"];
+  const type = types[Math.floor(Math.random() * types.length)];
+  const radius = 10;
+  const minY = playableMinY(radius);
+  const maxY = playableMaxY(radius);
+  const x = radius + Math.random() * (canvas.width - radius * 2);
+  const y = minY + Math.random() * Math.max(1, maxY - minY);
+  powerUpDrops.push({ x, y, radius, type, ttl: 12, phase: Math.random() * Math.PI * 2 });
+}
+
+function drawPowerUpDrop(drop) {
+  const pulse = Math.sin(performance.now() * 0.01 + drop.phase) * 1.3;
+  ctx.beginPath();
+  ctx.arc(drop.x, drop.y, drop.radius + pulse, 0, Math.PI * 2);
+  ctx.fillStyle = drop.type === "pulse" ? "#d88bff" : "#7cf0ff";
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.font = "10px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText(drop.type === "pulse" ? "P" : "N", drop.x, drop.y + 3);
+}
+
+function updatePowerUpDrops(deltaSeconds) {
+  if (isGameplayPaused()) return;
+  for (let i = powerUpDrops.length - 1; i >= 0; i -= 1) {
+    const drop = powerUpDrops[i];
+    drop.ttl -= deltaSeconds;
+    if (drop.ttl <= 0) {
+      powerUpDrops.splice(i, 1);
+      continue;
+    }
+    const sumR = drop.radius + player.radius;
+    if (distanceSquared(drop.x, drop.y, player.x, player.y) < sumR * sumR) {
+      powerUpInventory[drop.type] += 1;
+      addHitEffect(drop.x, drop.y, "#ffffff", drop.type);
+      powerUpDrops.splice(i, 1);
+    }
+  }
+}
+
+function activatePowerUp() {
+  if (isGameplayPaused()) return;
+  if (powerUpInventory.pulse > 0) {
+    powerUpInventory.pulse -= 1;
+    const radius = 180;
+    for (let i = reds.length - 1; i >= 0; i -= 1) {
+      const red = reds[i];
+      if (distanceSquared(red.x, red.y, player.x, player.y) <= radius * radius) {
+        if (red.isBoss) {
+          if (red.shieldLayers > 0) red.shieldLayers -= 1;
+          else red.bossArmor = Math.max(0, red.bossArmor - 40);
+        } else {
+          reds.splice(i, 1);
+          player.credits += 1;
+        }
+      }
+    }
+    addHitEffect(player.x, player.y, "#d88bff", "pulse");
+    return;
+  }
+
+  if (powerUpInventory.nova > 0) {
+    powerUpInventory.nova -= 1;
+    const radius = 260;
+    for (let i = reds.length - 1; i >= 0; i -= 1) {
+      const red = reds[i];
+      if (distanceSquared(red.x, red.y, player.x, player.y) <= radius * radius) {
+        red.hp -= 24;
+        if (red.hp <= 0 && !red.isBoss) {
+          reds.splice(i, 1);
+          player.credits += 1;
+        }
+      }
+    }
+    addHitEffect(player.x, player.y, "#7cf0ff", "nova");
+  }
+}
+
+function isGameplayPaused() {
+  return paused || armoryOpen || menuScreen !== "none";
 }
 
 function updatePlayArea() {
@@ -299,7 +413,7 @@ function clampPlayer() {
 }
 
 function updatePlayer(deltaSeconds) {
-  if (gameOver || paused) return;
+  if (gameOver || isGameplayPaused()) return;
 
   let moveX = 0;
   let moveY = 0;
@@ -347,7 +461,7 @@ function spawnHealthDrop() {
 }
 
 function updateHealthDrops(deltaSeconds) {
-  if (paused || gameOver) return;
+  if (isGameplayPaused() || gameOver) return;
 
   for (let i = healthDrops.length - 1; i >= 0; i -= 1) {
     const drop = healthDrops[i];
@@ -440,7 +554,7 @@ function damagePlayer(amount) {
 }
 
 function updateReds(deltaSeconds, deltaMs) {
-  if (gameOver || paused) return;
+  if (gameOver || isGameplayPaused()) return;
 
   const config = levelConfig(level);
   for (let i = reds.length - 1; i >= 0; i -= 1) {
@@ -538,7 +652,7 @@ function fireAtNearestEnemy() {
 }
 
 function updateProjectiles(deltaSeconds) {
-  if (paused) return;
+  if (isGameplayPaused()) return;
 
   for (let i = projectiles.length - 1; i >= 0; i -= 1) {
     const projectile = projectiles[i];
@@ -595,7 +709,7 @@ function updateProjectiles(deltaSeconds) {
 }
 
 function updateEnemyProjectiles(deltaSeconds) {
-  if (paused || gameOver) return;
+  if (isGameplayPaused() || gameOver) return;
 
   for (let i = enemyProjectiles.length - 1; i >= 0; i -= 1) {
     const projectile = enemyProjectiles[i];
@@ -624,7 +738,7 @@ function updateEnemyProjectiles(deltaSeconds) {
 }
 
 function checkCollisions() {
-  if (gameOver || paused) return;
+  if (gameOver || isGameplayPaused()) return;
 
   const config = levelConfig(level);
   for (let i = reds.length - 1; i >= 0; i -= 1) {
@@ -667,7 +781,7 @@ function resetHealthForLevel() {
 }
 
 function updateLevelFlow(deltaMs) {
-  if (gameOver || paused) return;
+  if (gameOver || isGameplayPaused()) return;
 
   if (inLevelTransition) {
     transitionTimer -= deltaMs;
@@ -703,6 +817,7 @@ function updateLevelFlow(deltaMs) {
   if (spawnedThisLevel >= config.spawnCount && reds.length === 0) {
     if (isBossLevel(level)) {
       bossesDefeated += 1;
+      spawnPowerUpDrop();
     }
 
     level += 1;
@@ -778,7 +893,7 @@ function updateUiText() {
   const pct = Math.max(0, Math.min(100, (player.health / player.maxHealth) * 100));
   uiHealthFill.style.width = `${pct}%`;
 
-  if (paused) {
+  if (isGameplayPaused()) {
     uiHint.textContent = "Paused — press Esc to resume.";
   } else if (!weaponsUnlocked) {
     uiHint.textContent = "Survive 5s to unlock weapon purchases.";
@@ -786,6 +901,7 @@ function updateUiText() {
     uiHint.textContent = "Press 1-9 to buy/equip weapons. Aim with mouse, hold Space to fire, and collect green health drops.";
   }
 
+  hudTitle.textContent = `Blue Dot Survival — ${playerName}`;
   updateWeaponPanel();
 }
 
@@ -968,7 +1084,7 @@ function togglePause(now) {
   if (gameOver) return;
 
   paused = !paused;
-  if (paused) {
+  if (isGameplayPaused()) {
     pauseStartedAt = now;
   } else {
     totalPausedMs += now - pauseStartedAt;
@@ -981,11 +1097,11 @@ function loop(now) {
   const deltaSeconds = deltaMs / 1000;
   lastTime = now;
 
-  if (!gameOver && !paused) {
+  if (!gameOver && !isGameplayPaused()) {
     scoreSeconds = (now - startTime - totalPausedMs) / 1000;
   }
 
-  if (!paused) {
+  if (!isGameplayPaused()) {
     fireCooldownMs = Math.max(0, fireCooldownMs - deltaMs);
 
     updatePlayer(deltaSeconds);
@@ -997,6 +1113,7 @@ function loop(now) {
     updateEnemyProjectiles(deltaSeconds);
     updateReds(deltaSeconds, deltaMs);
     updateHealthDrops(deltaSeconds);
+    updatePowerUpDrops(deltaSeconds);
     updateEffects(deltaSeconds);
     checkCollisions();
   }
@@ -1027,7 +1144,16 @@ window.addEventListener("keydown", (event) => {
 
   if (event.key === "Escape") {
     event.preventDefault();
-    togglePause(performance.now());
+    if (menuScreen === "none" && !armoryOpen) {
+      togglePause(performance.now());
+    }
+  }
+
+  if (key === "b") {
+    event.preventDefault();
+    if (menuScreen === "none" && !gameOver) {
+      setArmoryOpen(!armoryOpen);
+    }
   }
 
   if (/^[1-9]$/.test(key)) {
@@ -1045,11 +1171,37 @@ window.addEventListener("keyup", (event) => {
 });
 
 
+
+canvas.addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+});
+
 canvas.addEventListener("mousedown", (event) => {
   if (event.button === 0) {
     mouseFiring = true;
   }
+  if (event.button === 2) {
+    activatePowerUp();
+  }
 });
+
+startBtn.addEventListener("click", () => {
+  if (!hasReadRules) {
+    showMenu("rules");
+    return;
+  }
+  playerName = (nameInput.value || "Player").trim() || "Player";
+  showMenu("none");
+  restartGame();
+});
+
+menuLeaderboardBtn.addEventListener("click", () => showMenu("leaderboard"));
+rulesBtn.addEventListener("click", () => showMenu("rules"));
+acceptRulesBtn.addEventListener("click", () => {
+  hasReadRules = true;
+  showMenu("start");
+});
+backToMenuBtns.forEach((btn) => btn.addEventListener("click", () => showMenu("start")));
 
 window.addEventListener("mouseup", (event) => {
   if (event.button === 0) {

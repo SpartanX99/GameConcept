@@ -63,8 +63,16 @@ Also make sure your terminal is not including literal `\n` characters at the end
 - Buy/equip weapons: `1` to `9` (see Armory table in HUD)
 - Aim: move mouse cursor
 - Fire equipped weapon: hold `Space` or Left Mouse Button
+- Activate power-up: Right Mouse Button
+- Open/close Armory (pauses game): `B`
 - Pause/Resume: `Esc`
 - Restart after game over: `R`
+
+## Start Menu
+
+- Enter your name before starting.
+- You can open Rules and must acknowledge them before start.
+- Start menu includes quick leaderboard view.
 
 ## Gameplay additions
 

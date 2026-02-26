@@ -264,18 +264,25 @@ function isGameplayPaused() {
 }
 
 function updatePlayArea() {
-  const topRect = topStrip ? topStrip.getBoundingClientRect() : { bottom: 0 };
-  const armoryRect = weaponsPanel
-    ? weaponsPanel.getBoundingClientRect()
-    : { top: canvas.height, height: 0 };
+  const topStripRect = topStrip ? topStrip.getBoundingClientRect() : { bottom: 0 };
+  const hudRect = document.querySelector(".hud-panel")?.getBoundingClientRect() || { bottom: 0 };
+  const leaderboardRect = document.querySelector(".leaderboard")?.getBoundingClientRect() || { bottom: 0 };
+  const armoryRect = weaponsPanel ? weaponsPanel.getBoundingClientRect() : { top: canvas.height };
 
-  const topInset = Math.max(0, Math.ceil(topRect.bottom + 10));
-  const bottomInset = Math.max(0, Math.ceil(canvas.height - armoryRect.top + 10));
-  const minimumGap = 180;
+  const topBottom = Math.max(topStripRect.bottom, hudRect.bottom, leaderboardRect.bottom);
+  const extraTopSafety = 22;
+  const topInset = Math.max(0, Math.ceil(topBottom + extraTopSafety));
 
+  let bottomInset = 0;
+  const armoryVisible = weaponsPanel && weaponsPanel.classList.contains("visible");
+  if (armoryVisible) {
+    bottomInset = Math.max(0, Math.ceil(canvas.height - armoryRect.top + 12));
+  }
+
+  const minimumGap = 220;
   if (canvas.height - topInset - bottomInset < minimumGap) {
-    playArea.top = Math.max(0, topInset - 20);
-    playArea.bottom = Math.max(0, bottomInset - 20);
+    playArea.top = Math.max(0, topInset - 16);
+    playArea.bottom = Math.max(0, bottomInset - 12);
   } else {
     playArea.top = topInset;
     playArea.bottom = bottomInset;

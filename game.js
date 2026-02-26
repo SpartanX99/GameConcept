@@ -1,28 +1,29 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 const leaderboardRows = document.getElementById("leaderboardRows");
+const uiTime = document.getElementById("uiTime");
+const uiLevel = document.getElementById("uiLevel");
+const uiCredits = document.getElementById("uiCredits");
+const uiWeapon = document.getElementById("uiWeapon");
+const uiHint = document.getElementById("uiHint");
 
 const keysDown = Object.create(null);
 
 const playerStart = { x: 0, y: 0 };
-const player = {
-  x: 0,
-  y: 0,
-  radius: 12,
-  speed: 270,
-  credits: 0,
-};
+const player = { x: 0, y: 0, radius: 12, speed: 270, credits: 0 };
 
 const reds = [];
 const projectiles = [];
 
 let gameOver = false;
+let paused = false;
 let hasRecordedGameOver = false;
+let pauseStartedAt = 0;
+let totalPausedMs = 0;
 let startTime = performance.now();
 let scoreSeconds = 0;
 let lastTime = performance.now();
 
-const totalLevels = 5;
 let level = 1;
 let inLevelTransition = false;
 let transitionTimer = 0;
@@ -44,49 +45,53 @@ const leaderboardLimit = 8;
 const sessionBestTimes = [];
 let overallBestTimes = loadOverallBestTimes();
 
+function isBossLevel(currentLevel) {
+  return currentLevel % 5 === 0;
+}
+
 function levelConfig(currentLevel) {
-  if (currentLevel === 5) {
+  if (isBossLevel(currentLevel)) {
+    const tier = currentLevel / 5;
     return {
-      spawnIntervalMs: 700,
+      spawnIntervalMs: Math.max(180, 700 - tier * 35),
       spawnCount: 1,
-      speedMin: 55,
-      speedMax: 85,
-      radiusMin: 40,
-      radiusMax: 40,
-      hpMin: 35,
-      hpMax: 35,
+      speedMin: 68 + tier * 8,
+      speedMax: 85 + tier * 10,
+      radiusMin: Math.min(55, 34 + tier * 3),
+      radiusMax: Math.min(55, 34 + tier * 3),
+      hpMin: 35 + tier * 14,
+      hpMax: 35 + tier * 14,
       isBossLevel: true,
       dodgeLifetime: 99999,
     };
   }
 
   return {
-    spawnIntervalMs: Math.max(220, 900 - currentLevel * 110),
-    spawnCount: 8 + currentLevel * 5,
-    speedMin: 42 + currentLevel * 10,
-    speedMax: 70 + currentLevel * 15,
+    spawnIntervalMs: Math.max(120, 880 - currentLevel * 24),
+    spawnCount: 8 + currentLevel * 4,
+    speedMin: 45 + currentLevel * 3,
+    speedMax: 68 + currentLevel * 5,
     radiusMin: 9,
-    radiusMax: 14 + currentLevel,
+    radiusMax: Math.min(22, 13 + currentLevel * 0.5),
     hpMin: 1,
-    hpMax: 1 + Math.floor(currentLevel / 3),
+    hpMax: 1 + Math.floor(currentLevel / 6),
     isBossLevel: false,
-    dodgeLifetime: Math.max(3.4, 5.2 - currentLevel * 0.35),
+    dodgeLifetime: Math.max(1.4, 4.6 - currentLevel * 0.08),
   };
 }
 
 function resize() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
-
-  if (!playerStart.x && !playerStart.y) {
-    resetPlayerToCenter();
-  } else {
-    clampPlayer();
-  }
+  if (!playerStart.x && !playerStart.y) resetPlayerToCenter();
+  clampPlayer();
 }
 
 function clearScreen() {
-  ctx.fillStyle = "#111";
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, "#151925");
+  gradient.addColorStop(1, "#090c14");
+  ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
@@ -98,6 +103,14 @@ function resetPlayerToCenter() {
 }
 
 function drawPlayer() {
+  const glow = ctx.createRadialGradient(player.x, player.y, 2, player.x, player.y, player.radius + 10);
+  glow.addColorStop(0, "#8ec5ff");
+  glow.addColorStop(1, "rgba(45,125,255,0)");
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, player.radius + 8, 0, Math.PI * 2);
+  ctx.fill();
+
   ctx.beginPath();
   ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
   ctx.fillStyle = "#2d7dff";
@@ -107,7 +120,7 @@ function drawPlayer() {
 function drawRed(red) {
   ctx.beginPath();
   ctx.arc(red.x, red.y, red.radius, 0, Math.PI * 2);
-  ctx.fillStyle = red.isBoss ? "#b60000" : "#ff4b4b";
+  ctx.fillStyle = red.isBoss ? "#8b0b0b" : "#ff4b4b";
   ctx.fill();
 
   if (red.hp > 1) {
@@ -131,11 +144,10 @@ function clampPlayer() {
 }
 
 function updatePlayer(deltaSeconds) {
-  if (gameOver) return;
+  if (gameOver || paused) return;
 
   let moveX = 0;
   let moveY = 0;
-
   if (keysDown.ArrowLeft || keysDown.a) moveX -= 1;
   if (keysDown.ArrowRight || keysDown.d) moveX += 1;
   if (keysDown.ArrowUp || keysDown.w) moveY -= 1;
@@ -163,13 +175,12 @@ function spawnRed() {
   const radius = config.radiusMin + Math.random() * (config.radiusMax - config.radiusMin);
   const speed = config.speedMin + Math.random() * (config.speedMax - config.speedMin);
   const hp = Math.floor(config.hpMin + Math.random() * (config.hpMax - config.hpMin + 1));
-  const minDistance = level === 5 ? 260 : 180;
+  const minDistance = config.isBossLevel ? 260 : 180;
   const minDistanceSq = minDistance * minDistance;
 
   let x = 0;
   let y = 0;
   let attempts = 0;
-
   do {
     x = radius + Math.random() * (canvas.width - radius * 2);
     y = radius + Math.random() * (canvas.height - radius * 2);
@@ -180,10 +191,9 @@ function spawnRed() {
 }
 
 function updateReds(deltaSeconds) {
-  if (gameOver) return;
+  if (gameOver || paused) return;
 
   const config = levelConfig(level);
-
   for (let i = reds.length - 1; i >= 0; i -= 1) {
     const red = reds[i];
     red.ageSeconds += deltaSeconds;
@@ -191,11 +201,8 @@ function updateReds(deltaSeconds) {
     const toPlayerX = player.x - red.x;
     const toPlayerY = player.y - red.y;
     const len = Math.hypot(toPlayerX, toPlayerY) || 1;
-    const dirX = toPlayerX / len;
-    const dirY = toPlayerY / len;
-
-    red.x += dirX * red.speed * deltaSeconds;
-    red.y += dirY * red.speed * deltaSeconds;
+    red.x += (toPlayerX / len) * red.speed * deltaSeconds;
+    red.y += (toPlayerY / len) * red.speed * deltaSeconds;
 
     if (!red.isBoss && red.ageSeconds >= config.dodgeLifetime) {
       reds.splice(i, 1);
@@ -205,7 +212,7 @@ function updateReds(deltaSeconds) {
 }
 
 function fireAtNearestEnemy() {
-  if (!equippedWeaponKey || reds.length === 0) return;
+  if (gameOver || paused || !equippedWeaponKey || reds.length === 0) return;
   const weapon = weapons[equippedWeaponKey];
   if (!weapon || fireCooldownMs > 0) return;
   if (!keysDown[" "] && !keysDown.Space && !keysDown.space) return;
@@ -219,7 +226,6 @@ function fireAtNearestEnemy() {
       nearest = red;
     }
   }
-
   if (!nearest) return;
 
   const dx = nearest.x - player.x;
@@ -241,6 +247,8 @@ function fireAtNearestEnemy() {
 }
 
 function updateProjectiles(deltaSeconds) {
+  if (paused) return;
+
   for (let i = projectiles.length - 1; i >= 0; i -= 1) {
     const projectile = projectiles[i];
     projectile.ttl -= deltaSeconds;
@@ -267,21 +275,18 @@ function updateProjectiles(deltaSeconds) {
         hit = true;
         if (red.hp <= 0) {
           reds.splice(r, 1);
-          player.credits += red.isBoss ? 12 : 2;
+          player.credits += red.isBoss ? 20 + Math.floor(level / 5) * 5 : 2;
         }
         break;
       }
     }
 
-    if (hit) {
-      projectiles.splice(i, 1);
-    }
+    if (hit) projectiles.splice(i, 1);
   }
 }
 
 function checkCollisions() {
-  if (gameOver) return;
-
+  if (gameOver || paused) return;
   for (const red of reds) {
     const sumR = red.radius + player.radius;
     if (distanceSquared(red.x, red.y, player.x, player.y) < sumR * sumR) {
@@ -292,9 +297,7 @@ function checkCollisions() {
 }
 
 function tryUnlockWeapons() {
-  if (!weaponsUnlocked && scoreSeconds >= 5) {
-    weaponsUnlocked = true;
-  }
+  if (!weaponsUnlocked && scoreSeconds >= 5) weaponsUnlocked = true;
 }
 
 function tryBuyOrEquipWeapon(key) {
@@ -304,7 +307,6 @@ function tryBuyOrEquipWeapon(key) {
   if (!weaponEntry) return;
 
   const [weaponId, weapon] = weaponEntry;
-
   if (!purchasedWeapons.has(weaponId)) {
     if (player.credits < weapon.cost) return;
     player.credits -= weapon.cost;
@@ -315,7 +317,7 @@ function tryBuyOrEquipWeapon(key) {
 }
 
 function updateLevelFlow(deltaMs) {
-  if (gameOver) return;
+  if (gameOver || paused) return;
 
   if (inLevelTransition) {
     transitionTimer -= deltaMs;
@@ -328,7 +330,6 @@ function updateLevelFlow(deltaMs) {
   }
 
   const config = levelConfig(level);
-
   if (spawnedThisLevel < config.spawnCount) {
     spawnTimer += deltaMs;
     while (spawnTimer >= config.spawnIntervalMs && spawnedThisLevel < config.spawnCount) {
@@ -339,70 +340,77 @@ function updateLevelFlow(deltaMs) {
   }
 
   if (spawnedThisLevel >= config.spawnCount && reds.length === 0) {
-    if (level >= totalLevels) {
-      gameOver = true;
-      return;
-    }
-
     level += 1;
     inLevelTransition = true;
-    transitionTimer = 1800;
+    transitionTimer = isBossLevel(level) ? 2400 : 1300;
     spawnTimer = 0;
     spawnedThisLevel = 0;
   }
 }
 
-function drawHud() {
-  ctx.fillStyle = "#f0f0f0";
-  ctx.font = "bold 22px Arial";
-  ctx.textAlign = "left";
-  ctx.fillText(`Time: ${scoreSeconds.toFixed(1)}s`, 18, 34);
+function updateUiText() {
+  uiTime.textContent = `${scoreSeconds.toFixed(1)}s`;
+  uiLevel.textContent = `${level}${isBossLevel(level) ? " (Boss)" : ""}`;
+  uiCredits.textContent = `${player.credits}`;
+  uiWeapon.textContent = weaponsUnlocked
+    ? equippedWeaponKey
+      ? `${weapons[equippedWeaponKey].name}`
+      : "None equipped"
+    : "Locked";
 
-  ctx.font = "16px Arial";
-  ctx.fillStyle = "#cfcfcf";
-  ctx.fillText(`Level: ${level}/${totalLevels}`, 18, 58);
-  ctx.fillText(`Credits: ${player.credits}`, 18, 80);
-  ctx.fillText("Move: Arrow Keys / WASD", 18, 102);
-
-  if (!weaponsUnlocked) {
-    ctx.fillStyle = "#ffd36c";
-    ctx.fillText("Weapons unlock at 5s survival", 18, 124);
+  if (paused) {
+    uiHint.textContent = "Paused — press Esc to resume.";
+  } else if (!weaponsUnlocked) {
+    uiHint.textContent = "Survive 5s to unlock weapon purchases.";
   } else {
-    const equippedName = equippedWeaponKey ? weapons[equippedWeaponKey].name : "None";
-    ctx.fillStyle = "#9cd0ff";
-    ctx.fillText(`Equipped: ${equippedName} (Hold Space to fire)`, 18, 124);
-    ctx.fillStyle = "#f6f6f6";
-    ctx.fillText("Buy/Equip: 1 Pulse(4)  2 Burst(10)  3 Rail(18)", 18, 146);
-  }
-
-  if (inLevelTransition) {
-    ctx.fillStyle = "#ffffff";
-    ctx.textAlign = "center";
-    ctx.font = "bold 38px Arial";
-    ctx.fillText(`Level ${level}`, canvas.width / 2, 84);
+    uiHint.textContent = "Buy/equip: 1 Pulse(4), 2 Burst(10), 3 Rail(18). Hold Space to fire.";
   }
 }
 
-function drawGameOverOverlay() {
-  if (!gameOver) return;
+function drawOverlayMessage() {
+  if (paused || gameOver || inLevelTransition) {
+    ctx.fillStyle = "rgba(0,0,0,0.48)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
 
-  ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (inLevelTransition && !paused && !gameOver) {
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.font = "bold 40px Arial";
+    ctx.fillText(
+      isBossLevel(level) ? `BOSS LEVEL ${level}` : `Level ${level}`,
+      canvas.width / 2,
+      canvas.height / 2,
+    );
+  }
 
-  ctx.fillStyle = "#ffffff";
-  ctx.textAlign = "center";
-  ctx.font = "bold 46px Arial";
-  const title = level >= totalLevels && reds.length === 0 ? "You Win!" : "Game Over";
-  ctx.fillText(title, canvas.width / 2, canvas.height / 2 - 16);
-  ctx.font = "24px Arial";
-  ctx.fillText("Press R to Restart", canvas.width / 2, canvas.height / 2 + 28);
+  if (paused && !gameOver) {
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.font = "bold 46px Arial";
+    ctx.fillText("Paused", canvas.width / 2, canvas.height / 2 - 8);
+    ctx.font = "24px Arial";
+    ctx.fillText("Press Esc to Resume", canvas.width / 2, canvas.height / 2 + 30);
+  }
+
+  if (gameOver) {
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.font = "bold 46px Arial";
+    ctx.fillText("Game Over", canvas.width / 2, canvas.height / 2 - 12);
+    ctx.font = "24px Arial";
+    ctx.fillText("Press R to Restart", canvas.width / 2, canvas.height / 2 + 28);
+  }
 }
 
 function restartGame() {
   reds.length = 0;
   projectiles.length = 0;
   gameOver = false;
+  paused = false;
   hasRecordedGameOver = false;
+  pauseStartedAt = 0;
+  totalPausedMs = 0;
   scoreSeconds = 0;
   startTime = performance.now();
   level = 1;
@@ -477,24 +485,37 @@ function recordCompletedRun() {
   renderLeaderboard();
 }
 
+function togglePause(now) {
+  if (gameOver) return;
+
+  paused = !paused;
+  if (paused) {
+    pauseStartedAt = now;
+  } else {
+    totalPausedMs += now - pauseStartedAt;
+    lastTime = now;
+  }
+}
+
 function loop(now) {
   const deltaMs = Math.min(48, now - lastTime);
   const deltaSeconds = deltaMs / 1000;
   lastTime = now;
 
-  if (!gameOver) {
-    scoreSeconds = (now - startTime) / 1000;
+  if (!gameOver && !paused) {
+    scoreSeconds = (now - startTime - totalPausedMs) / 1000;
   }
 
-  fireCooldownMs = Math.max(0, fireCooldownMs - deltaMs);
-
-  updatePlayer(deltaSeconds);
-  tryUnlockWeapons();
-  updateLevelFlow(deltaMs);
-  fireAtNearestEnemy();
-  updateProjectiles(deltaSeconds);
-  updateReds(deltaSeconds);
-  checkCollisions();
+  if (!paused) {
+    fireCooldownMs = Math.max(0, fireCooldownMs - deltaMs);
+    updatePlayer(deltaSeconds);
+    tryUnlockWeapons();
+    updateLevelFlow(deltaMs);
+    fireAtNearestEnemy();
+    updateProjectiles(deltaSeconds);
+    updateReds(deltaSeconds);
+    checkCollisions();
+  }
 
   if (gameOver && !hasRecordedGameOver) {
     hasRecordedGameOver = true;
@@ -505,8 +526,8 @@ function loop(now) {
   drawPlayer();
   reds.forEach(drawRed);
   projectiles.forEach(drawProjectile);
-  drawHud();
-  drawGameOverOverlay();
+  updateUiText();
+  drawOverlayMessage();
 
   requestAnimationFrame(loop);
 }
@@ -514,6 +535,11 @@ function loop(now) {
 window.addEventListener("keydown", (event) => {
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   keysDown[key] = true;
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    togglePause(performance.now());
+  }
 
   if (key === "1" || key === "2" || key === "3") {
     tryBuyOrEquipWeapon(key);
@@ -533,6 +559,7 @@ window.addEventListener("resize", resize);
 
 renderLeaderboard();
 resize();
+updateUiText();
 requestAnimationFrame((time) => {
   lastTime = time;
   startTime = time;

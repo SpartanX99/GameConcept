@@ -71,6 +71,6 @@ Also make sure your terminal is not including literal `\n` characters at the end
 - **Weapons**: expanded armory with 9 weapon options, readable stats table, and boss-tier unlocks.
 - **Levels**: continuous progression with increasing difficulty over time.
 - **Bosses**: every 5th level is a boss battle, and each boss tier scales up in HP/armor/speed.
-- **Leaderboard**: tracks best times this session and best times overall.
+- **Leaderboard**: shows only best time this session and best overall time.
 - **Enemy evolution**: after each boss tier, regular reds gain armor and more shooter behavior.
 - **Health system**: blue dot has a full health bar that resets each level.

@@ -10,6 +10,8 @@ const uiWeapon = document.getElementById("uiWeapon");
 const uiHint = document.getElementById("uiHint");
 const uiHealthText = document.getElementById("uiHealthText");
 const uiHealthFill = document.getElementById("uiHealthFill");
+const topStrip = document.querySelector(".top-strip");
+const weaponsPanel = document.querySelector(".weapons-panel");
 
 const keysDown = Object.create(null);
 
@@ -27,6 +29,7 @@ const player = {
 const reds = [];
 const projectiles = [];
 const enemyProjectiles = [];
+const playArea = { top: 0, bottom: 0 };
 
 let gameOver = false;
 let paused = false;
@@ -65,6 +68,8 @@ const leaderboardKey = "blue-dot-survival-best-overall";
 const leaderboardLimit = 8;
 const sessionBestTimes = [];
 let overallBestTimes = loadOverallBestTimes();
+let sessionBestTime = null;
+let overallBestTime = overallBestTimes[0] ?? null;
 
 function isBossLevel(currentLevel) {
   return currentLevel % 5 === 0;
@@ -125,9 +130,37 @@ function maxHealthForLevel(currentLevel) {
   return 100 + tier * 18;
 }
 
+function updatePlayArea() {
+  const topRect = topStrip ? topStrip.getBoundingClientRect() : { bottom: 0 };
+  const armoryRect = weaponsPanel
+    ? weaponsPanel.getBoundingClientRect()
+    : { top: canvas.height, height: 0 };
+
+  const topInset = Math.max(0, Math.ceil(topRect.bottom + 10));
+  const bottomInset = Math.max(0, Math.ceil(canvas.height - armoryRect.top + 10));
+  const minimumGap = 180;
+
+  if (canvas.height - topInset - bottomInset < minimumGap) {
+    playArea.top = Math.max(0, topInset - 20);
+    playArea.bottom = Math.max(0, bottomInset - 20);
+  } else {
+    playArea.top = topInset;
+    playArea.bottom = bottomInset;
+  }
+}
+
+function playableMinY(radius) {
+  return Math.max(radius, playArea.top + radius);
+}
+
+function playableMaxY(radius) {
+  return Math.min(canvas.height - radius, canvas.height - playArea.bottom - radius);
+}
+
 function resize() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
+  updatePlayArea();
   if (!playerStart.x && !playerStart.y) resetPlayerToCenter();
   clampPlayer();
 }
@@ -142,7 +175,7 @@ function clearScreen() {
 
 function resetPlayerToCenter() {
   playerStart.x = canvas.width / 2;
-  playerStart.y = canvas.height / 2;
+  playerStart.y = Math.max(canvas.height / 2, playableMinY(player.radius));
   player.x = playerStart.x;
   player.y = playerStart.y;
 }
@@ -168,11 +201,21 @@ function drawRed(red) {
   ctx.fillStyle = red.isBoss ? "#8b0b0b" : "#ff4b4b";
   ctx.fill();
 
-  if (red.hp > 1) {
+  if (red.isBoss && red.bossArmor > 0) {
+    const armorPct = red.bossArmor / Math.max(1, red.bossArmorMax);
+    ctx.strokeStyle = "#9fe7ff";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(red.x, red.y, red.radius + 7, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * armorPct);
+    ctx.stroke();
+  }
+
+  if (red.hp > 1 || (red.isBoss && red.bossArmor > 0)) {
     ctx.fillStyle = "#fff";
     ctx.font = "12px Arial";
     ctx.textAlign = "center";
-    ctx.fillText(`${Math.ceil(red.hp)}`, red.x, red.y + 4);
+    const hpText = red.isBoss && red.bossArmor > 0 ? `A:${Math.ceil(red.bossArmor)}` : `${Math.ceil(red.hp)}`;
+    ctx.fillText(hpText, red.x, red.y + 4);
   }
 }
 
@@ -192,7 +235,9 @@ function drawEnemyProjectile(projectile) {
 
 function clampPlayer() {
   player.x = Math.min(canvas.width - player.radius, Math.max(player.radius, player.x));
-  player.y = Math.min(canvas.height - player.radius, Math.max(player.radius, player.y));
+  const minY = playableMinY(player.radius);
+  const maxY = playableMaxY(player.radius);
+  player.y = Math.min(maxY, Math.max(minY, player.y));
 }
 
 function updatePlayer(deltaSeconds) {
@@ -239,11 +284,15 @@ function spawnRed() {
   let attempts = 0;
   do {
     x = radius + Math.random() * (canvas.width - radius * 2);
-    y = radius + Math.random() * (canvas.height - radius * 2);
+    const minY = playableMinY(radius);
+    const maxY = playableMaxY(radius);
+    y = minY + Math.random() * Math.max(1, maxY - minY);
     attempts += 1;
   } while (attempts < 30 && distanceSquared(x, y, player.x, player.y) < minDistanceSq);
 
   const canShoot = Math.random() < config.shooterChance;
+  const bossArmorMax = config.isBossLevel ? 24 + currentBossTier() * 14 : 0;
+
   reds.push({
     x,
     y,
@@ -251,6 +300,8 @@ function spawnRed() {
     speed,
     hp,
     armor: config.armor,
+    bossArmor: bossArmorMax,
+    bossArmorMax,
     ageSeconds: 0,
     isBoss: config.isBossLevel,
     canShoot,
@@ -378,8 +429,14 @@ function updateProjectiles(deltaSeconds) {
       const red = reds[r];
       const sumR = red.radius + projectile.radius;
       if (distanceSquared(projectile.x, projectile.y, red.x, red.y) < sumR * sumR) {
-        const effectiveDamage = Math.max(0.5, projectile.damage - red.armor * 0.3);
-        red.hp -= effectiveDamage;
+        let effectiveDamage = Math.max(0.5, projectile.damage - red.armor * 0.3);
+
+        if (red.isBoss && red.bossArmor > 0) {
+          red.bossArmor = Math.max(0, red.bossArmor - effectiveDamage);
+        } else {
+          red.hp -= effectiveDamage;
+        }
+
         hit = true;
 
         if (red.hp <= 0) {
@@ -671,18 +728,16 @@ function formatScore(timeSeconds) {
 function renderLeaderboard() {
   leaderboardRows.innerHTML = "";
 
-  for (let i = 0; i < leaderboardLimit; i += 1) {
-    const row = document.createElement("tr");
-    const sessionCell = document.createElement("td");
-    const overallCell = document.createElement("td");
+  const row = document.createElement("tr");
+  const sessionCell = document.createElement("td");
+  const overallCell = document.createElement("td");
 
-    sessionCell.textContent = formatScore(sessionBestTimes[i]);
-    overallCell.textContent = formatScore(overallBestTimes[i]);
+  sessionCell.textContent = formatScore(sessionBestTime);
+  overallCell.textContent = formatScore(overallBestTime);
 
-    row.appendChild(sessionCell);
-    row.appendChild(overallCell);
-    leaderboardRows.appendChild(row);
-  }
+  row.appendChild(sessionCell);
+  row.appendChild(overallCell);
+  leaderboardRows.appendChild(row);
 }
 
 function recordCompletedRun() {
@@ -693,8 +748,10 @@ function recordCompletedRun() {
   const sortedSession = sortBestTimes(sessionBestTimes);
   sessionBestTimes.length = 0;
   sessionBestTimes.push(...sortedSession);
+  sessionBestTime = sessionBestTimes[0] ?? null;
 
   overallBestTimes = sortBestTimes([...overallBestTimes, finalScore]);
+  overallBestTime = overallBestTimes[0] ?? null;
   saveOverallBestTimes();
   renderLeaderboard();
 }
@@ -778,6 +835,7 @@ window.addEventListener("resize", resize);
 
 renderLeaderboard();
 resize();
+updatePlayArea();
 resetHealthForLevel();
 updateUiText();
 requestAnimationFrame((time) => {

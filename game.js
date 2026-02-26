@@ -1,5 +1,6 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
+const leaderboardRows = document.getElementById("leaderboardRows");
 
 const keysDown = Object.create(null);
 
@@ -14,6 +15,7 @@ const player = {
 const reds = [];
 
 let gameOver = false;
+let hasRecordedGameOver = false;
 let startTime = performance.now();
 let scoreSeconds = 0;
 let lastTime = performance.now();
@@ -22,6 +24,11 @@ let spawnTimer = 0;
 const initialSpawnInterval = 900;
 const minSpawnInterval = 260;
 const difficultyRampPerSecond = 12;
+
+const leaderboardKey = "blue-dot-survival-best-overall";
+const leaderboardLimit = 8;
+const sessionBestTimes = [];
+let overallBestTimes = loadOverallBestTimes();
 
 function resize() {
   canvas.width = window.innerWidth;
@@ -182,6 +189,7 @@ function drawGameOverOverlay() {
 function restartGame() {
   reds.length = 0;
   gameOver = false;
+  hasRecordedGameOver = false;
   scoreSeconds = 0;
   startTime = performance.now();
   spawnTimer = 0;
@@ -202,6 +210,78 @@ function updateSpawning(deltaMs) {
   }
 }
 
+function sortBestTimes(times) {
+  return [...times].sort((a, b) => b - a).slice(0, leaderboardLimit);
+}
+
+function saveOverallBestTimes() {
+  try {
+    localStorage.setItem(leaderboardKey, JSON.stringify(overallBestTimes));
+  } catch (_error) {
+    // Ignore storage write failures.
+  }
+}
+
+function loadOverallBestTimes() {
+  try {
+    const raw = localStorage.getItem(leaderboardKey);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return sortBestTimes(parsed.filter((value) => Number.isFinite(value) && value > 0));
+  } catch (_error) {
+    return [];
+  }
+}
+
+function formatScore(timeSeconds) {
+  if (typeof timeSeconds !== "number") {
+    return "-";
+  }
+
+  return `${timeSeconds.toFixed(1)}s`;
+}
+
+function renderLeaderboard() {
+  leaderboardRows.innerHTML = "";
+
+  for (let i = 0; i < leaderboardLimit; i += 1) {
+    const row = document.createElement("tr");
+
+    const sessionCell = document.createElement("td");
+    sessionCell.textContent = formatScore(sessionBestTimes[i]);
+
+    const overallCell = document.createElement("td");
+    overallCell.textContent = formatScore(overallBestTimes[i]);
+
+    row.appendChild(sessionCell);
+    row.appendChild(overallCell);
+    leaderboardRows.appendChild(row);
+  }
+}
+
+function recordCompletedRun() {
+  const finalScore = Number(scoreSeconds.toFixed(1));
+  if (!Number.isFinite(finalScore) || finalScore <= 0) {
+    return;
+  }
+
+  sessionBestTimes.push(finalScore);
+  const sortedSession = sortBestTimes(sessionBestTimes);
+  sessionBestTimes.length = 0;
+  sessionBestTimes.push(...sortedSession);
+
+  overallBestTimes = sortBestTimes([...overallBestTimes, finalScore]);
+  saveOverallBestTimes();
+  renderLeaderboard();
+}
+
 function loop(now) {
   const deltaMs = Math.min(48, now - lastTime);
   const deltaSeconds = deltaMs / 1000;
@@ -215,6 +295,11 @@ function loop(now) {
   updateSpawning(deltaMs);
   updateReds(deltaSeconds);
   checkCollisions();
+
+  if (gameOver && !hasRecordedGameOver) {
+    hasRecordedGameOver = true;
+    recordCompletedRun();
+  }
 
   clearScreen();
   drawPlayer();
@@ -241,6 +326,7 @@ window.addEventListener("keyup", (event) => {
 
 window.addEventListener("resize", resize);
 
+renderLeaderboard();
 resize();
 requestAnimationFrame((time) => {
   lastTime = time;

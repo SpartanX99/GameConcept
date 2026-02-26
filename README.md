@@ -62,7 +62,7 @@ Also make sure your terminal is not including literal `\n` characters at the end
 - Unlock weapons after 5 seconds of survival
 - Buy/equip weapons: `1` to `9` (see Armory table in HUD)
 - Aim: move mouse cursor
-- Fire equipped weapon: hold `Space`
+- Fire equipped weapon: hold `Space` or Left Mouse Button
 - Pause/Resume: `Esc`
 - Restart after game over: `R`
 

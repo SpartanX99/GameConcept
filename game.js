@@ -34,6 +34,7 @@ const hitEffects = [];
 const healthDrops = [];
 const playArea = { top: 0, bottom: 0 };
 const aim = { x: 0, y: 0, active: false };
+let mouseFiring = false;
 
 let gameOver = false;
 let paused = false;
@@ -329,6 +330,11 @@ function randomBetween(min, max) {
 }
 
 
+
+function isOutsidePlayableY(y, radius = 0) {
+  return y < playableMinY(radius) - 2 || y > playableMaxY(radius) + 2;
+}
+
 function spawnHealthDrop() {
   const radius = 9;
   const minY = playableMinY(radius);
@@ -346,6 +352,11 @@ function updateHealthDrops(deltaSeconds) {
   for (let i = healthDrops.length - 1; i >= 0; i -= 1) {
     const drop = healthDrops[i];
     drop.ttl -= deltaSeconds;
+
+    if (isOutsidePlayableY(drop.y, drop.radius)) {
+      healthDrops.splice(i, 1);
+      continue;
+    }
 
     if (drop.ttl <= 0) {
       healthDrops.splice(i, 1);
@@ -442,6 +453,9 @@ function updateReds(deltaSeconds, deltaMs) {
     red.x += (toPlayerX / len) * red.speed * deltaSeconds;
     red.y += (toPlayerY / len) * red.speed * deltaSeconds;
 
+    red.x = Math.min(canvas.width - red.radius, Math.max(red.radius, red.x));
+    red.y = Math.min(playableMaxY(red.radius), Math.max(playableMinY(red.radius), red.y));
+
     if (red.canShoot) {
       red.shotCooldownMs -= deltaMs;
       if (red.shotCooldownMs <= 0) {
@@ -502,7 +516,7 @@ function fireAtNearestEnemy() {
   if (gameOver || paused || !equippedWeaponId) return;
   const weapon = getWeaponById(equippedWeaponId);
   if (!weapon || fireCooldownMs > 0) return;
-  if (!keysDown[" "] && !keysDown.Space && !keysDown.space) return;
+  if (!mouseFiring && !keysDown[" "] && !keysDown.Space && !keysDown.space) return;
 
   const dir = getAimDirection();
 
@@ -537,7 +551,8 @@ function updateProjectiles(deltaSeconds) {
       projectile.x < -20 ||
       projectile.y < -20 ||
       projectile.x > canvas.width + 20 ||
-      projectile.y > canvas.height + 20
+      projectile.y > canvas.height + 20 ||
+      isOutsidePlayableY(projectile.y, projectile.radius)
     ) {
       projectiles.splice(i, 1);
       continue;
@@ -593,7 +608,8 @@ function updateEnemyProjectiles(deltaSeconds) {
       projectile.x < -20 ||
       projectile.y < -20 ||
       projectile.x > canvas.width + 20 ||
-      projectile.y > canvas.height + 20
+      projectile.y > canvas.height + 20 ||
+      isOutsidePlayableY(projectile.y, projectile.radius)
     ) {
       enemyProjectiles.splice(i, 1);
       continue;
@@ -1026,6 +1042,23 @@ window.addEventListener("keydown", (event) => {
 window.addEventListener("keyup", (event) => {
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   delete keysDown[key];
+});
+
+
+canvas.addEventListener("mousedown", (event) => {
+  if (event.button === 0) {
+    mouseFiring = true;
+  }
+});
+
+window.addEventListener("mouseup", (event) => {
+  if (event.button === 0) {
+    mouseFiring = false;
+  }
+});
+
+window.addEventListener("blur", () => {
+  mouseFiring = false;
 });
 
 window.addEventListener("mousemove", (event) => {

@@ -1,0 +1,55 @@
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; width: 100%; height: 100%; overflow: hidden;
+  background: radial-gradient(circle at center, #1a1a1a 0%, #0a0a0a 100%);
+  font-family: "Segoe UI", Arial, Helvetica, sans-serif; color: #f6f8ff;
+}
+#gameCanvas { display: block; width: 100vw; height: 100vh; }
+.top-strip {
+  position: fixed; top: 10px; left: 10px; right: 10px;
+  display: grid; grid-template-columns: minmax(420px, 1fr) 320px; gap: 10px; pointer-events: none;
+}
+.hud-panel, .leaderboard, .weapons-panel, .menu-card {
+  pointer-events: auto; backdrop-filter: blur(8px);
+  background: linear-gradient(180deg, rgba(18,22,30,0.84), rgba(10,13,20,0.8));
+  border: 1px solid rgba(149,182,255,0.2); box-shadow: 0 8px 24px rgba(0,0,0,0.35), inset 0 0 14px rgba(149,182,255,0.06);
+  border-radius: 12px;
+}
+.hud-panel { padding: 10px 12px; max-height: 170px; overflow: hidden; }
+.hud-panel h1 { margin: 0 0 7px; font-size: 18px; color: #bfe4ff; }
+.hud-grid { display: grid; grid-template-columns: repeat(4, auto 1fr); gap: 4px 10px; font-size: 13px; margin-bottom: 6px; }
+.hud-grid span { color: #a8b6cd; }
+.health-wrap { margin: 6px 0; }
+.health-header { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; color: #cfd9ec; }
+.health-track { height: 10px; border-radius: 999px; background: rgba(255,255,255,0.14); overflow: hidden; border: 1px solid rgba(255,255,255,0.2); }
+.health-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff4f4f 0%, #ffd56c 45%, #6cff9b 100%); transition: width 110ms linear; }
+#uiHint { margin: 0; font-size: 12px; color: #d3deef; line-height: 1.3; }
+.leaderboard { padding: 10px 12px; max-height: 170px; }
+.leaderboard h2, .weapons-panel h2 { margin: 0 0 6px; font-size: 16px; color: #bfe4ff; }
+.leaderboard table, .weapons-panel table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.leaderboard th, .leaderboard td, .weapons-panel th, .weapons-panel td {
+  text-align: left; padding: 6px 4px; border-bottom: 1px solid rgba(255,255,255,0.1); font-size: 12px;
+}
+.leaderboard th, .weapons-panel th { color: #8fd0ff; font-weight: 700; }
+.leaderboard tr:last-child td, .weapons-panel tr:last-child td { border-bottom: none; }
+.weapons-panel {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 12px; width: min(1100px, calc(100vw - 20px));
+  max-height: 42vh; overflow: auto; padding: 10px 12px; display: none;
+}
+.weapons-panel.visible { display: block; }
+.weapon-equipped { color: #72ff9c; }
+.weapon-locked { color: #d8a0a0; }
+.weapon-available { color: #ffe4a0; }
+
+.menu-overlay {
+  position: fixed; inset: 0; background: rgba(5,8,14,0.72); display: flex; align-items: center; justify-content: center;
+  z-index: 20;
+}
+.menu-card { width: min(560px, calc(100vw - 30px)); padding: 16px; }
+.menu-card h2 { margin: 0 0 10px; }
+.menu-card label { display: block; font-size: 13px; color: #c8d6ef; }
+.menu-card input { width: 100%; margin-top: 6px; padding: 8px; border-radius: 8px; border: 1px solid #37507e; background: #0b1220; color: #fff; }
+.menu-actions { margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+.menu-actions button { padding: 8px 12px; border-radius: 8px; border: 1px solid #4f7cc0; background: #12203a; color: #eaf3ff; cursor: pointer; }
+.menu-note { color: #9fb6db; margin: 8px 0 0; }
+.hidden { display: none !important; }

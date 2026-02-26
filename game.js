@@ -1,19 +1,32 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
+
 const leaderboardRows = document.getElementById("leaderboardRows");
+const weaponRows = document.getElementById("weaponRows");
 const uiTime = document.getElementById("uiTime");
 const uiLevel = document.getElementById("uiLevel");
 const uiCredits = document.getElementById("uiCredits");
 const uiWeapon = document.getElementById("uiWeapon");
 const uiHint = document.getElementById("uiHint");
+const uiHealthText = document.getElementById("uiHealthText");
+const uiHealthFill = document.getElementById("uiHealthFill");
 
 const keysDown = Object.create(null);
 
 const playerStart = { x: 0, y: 0 };
-const player = { x: 0, y: 0, radius: 12, speed: 270, credits: 0 };
+const player = {
+  x: 0,
+  y: 0,
+  radius: 12,
+  speed: 270,
+  credits: 0,
+  maxHealth: 100,
+  health: 100,
+};
 
 const reds = [];
 const projectiles = [];
+const enemyProjectiles = [];
 
 let gameOver = false;
 let paused = false;
@@ -25,19 +38,27 @@ let scoreSeconds = 0;
 let lastTime = performance.now();
 
 let level = 1;
+let bossesDefeated = 0;
 let inLevelTransition = false;
 let transitionTimer = 0;
 let spawnTimer = 0;
 let spawnedThisLevel = 0;
 
 let weaponsUnlocked = false;
-const weapons = {
-  pulse: { key: "1", name: "Pulse", cost: 4, damage: 1, speed: 460, cooldownMs: 340, color: "#6ce4ff" },
-  burst: { key: "2", name: "Burst", cost: 10, damage: 2, speed: 540, cooldownMs: 250, color: "#ffe66c" },
-  rail: { key: "3", name: "Rail", cost: 18, damage: 4, speed: 680, cooldownMs: 180, color: "#ff9cf7" },
-};
+const weapons = [
+  { id: "pulse", key: "1", name: "Pulse Carbine", cost: 4, damage: 1, speed: 460, cooldownMs: 340, color: "#6ce4ff", unlockTier: 0 },
+  { id: "burst", key: "2", name: "Burst Rifle", cost: 10, damage: 2, speed: 540, cooldownMs: 250, color: "#ffe66c", unlockTier: 0 },
+  { id: "rail", key: "3", name: "Rail Shot", cost: 18, damage: 4, speed: 680, cooldownMs: 180, color: "#ff9cf7", unlockTier: 0 },
+  { id: "flare", key: "4", name: "Flare Cannon", cost: 26, damage: 6, speed: 520, cooldownMs: 260, color: "#ff9f7a", unlockTier: 1 },
+  { id: "ion", key: "5", name: "Ion Needle", cost: 34, damage: 7, speed: 750, cooldownMs: 150, color: "#8bffea", unlockTier: 1 },
+  { id: "arc", key: "6", name: "Arc Blaster", cost: 42, damage: 9, speed: 620, cooldownMs: 175, color: "#9db5ff", unlockTier: 2 },
+  { id: "nova", key: "7", name: "Nova Driver", cost: 54, damage: 12, speed: 700, cooldownMs: 160, color: "#f7a3ff", unlockTier: 2 },
+  { id: "void", key: "8", name: "Void Lance", cost: 70, damage: 16, speed: 780, cooldownMs: 145, color: "#d8ff7c", unlockTier: 3 },
+  { id: "omega", key: "9", name: "Omega Repeater", cost: 88, damage: 20, speed: 840, cooldownMs: 130, color: "#ffffff", unlockTier: 4 },
+];
+
 const purchasedWeapons = new Set();
-let equippedWeaponKey = null;
+let equippedWeaponId = null;
 let fireCooldownMs = 0;
 
 const leaderboardKey = "blue-dot-survival-best-overall";
@@ -49,35 +70,59 @@ function isBossLevel(currentLevel) {
   return currentLevel % 5 === 0;
 }
 
+function currentBossTier() {
+  return Math.floor((level - 1) / 5);
+}
+
 function levelConfig(currentLevel) {
+  const tier = Math.floor((currentLevel - 1) / 5);
+
   if (isBossLevel(currentLevel)) {
-    const tier = currentLevel / 5;
     return {
-      spawnIntervalMs: Math.max(180, 700 - tier * 35),
+      spawnIntervalMs: Math.max(130, 670 - tier * 30),
       spawnCount: 1,
-      speedMin: 68 + tier * 8,
-      speedMax: 85 + tier * 10,
-      radiusMin: Math.min(55, 34 + tier * 3),
-      radiusMax: Math.min(55, 34 + tier * 3),
-      hpMin: 35 + tier * 14,
-      hpMax: 35 + tier * 14,
+      speedMin: 72 + tier * 9,
+      speedMax: 95 + tier * 11,
+      radiusMin: Math.min(62, 35 + tier * 3),
+      radiusMax: Math.min(62, 35 + tier * 3),
+      hpMin: 42 + tier * 18,
+      hpMax: 42 + tier * 18,
+      armor: Math.min(10, 2 + tier),
       isBossLevel: true,
       dodgeLifetime: 99999,
+      shooterChance: 0.9,
+      enemyShotCooldownMinMs: 850,
+      enemyShotCooldownMaxMs: 1300,
+      enemyShotSpeed: 190 + tier * 9,
+      enemyContactDamage: 24 + tier * 3,
+      enemyShotDamage: 10 + tier * 2,
     };
   }
 
   return {
-    spawnIntervalMs: Math.max(120, 880 - currentLevel * 24),
-    spawnCount: 8 + currentLevel * 4,
-    speedMin: 45 + currentLevel * 3,
-    speedMax: 68 + currentLevel * 5,
+    spawnIntervalMs: Math.max(100, 860 - currentLevel * 20),
+    spawnCount: 9 + currentLevel * 4,
+    speedMin: 48 + currentLevel * 2.8,
+    speedMax: 72 + currentLevel * 4.2,
     radiusMin: 9,
-    radiusMax: Math.min(22, 13 + currentLevel * 0.5),
-    hpMin: 1,
-    hpMax: 1 + Math.floor(currentLevel / 6),
+    radiusMax: Math.min(24, 13 + currentLevel * 0.4),
+    hpMin: 1 + Math.floor(tier * 0.7),
+    hpMax: 2 + Math.floor(currentLevel / 7) + tier,
+    armor: Math.min(8, tier),
     isBossLevel: false,
-    dodgeLifetime: Math.max(1.4, 4.6 - currentLevel * 0.08),
+    dodgeLifetime: Math.max(1.2, 4.6 - currentLevel * 0.07),
+    shooterChance: Math.min(0.62, 0.06 + tier * 0.11),
+    enemyShotCooldownMinMs: Math.max(750, 1900 - tier * 170),
+    enemyShotCooldownMaxMs: Math.max(1200, 2700 - tier * 180),
+    enemyShotSpeed: 160 + tier * 8,
+    enemyContactDamage: 12 + tier * 2,
+    enemyShotDamage: 5 + tier,
   };
+}
+
+function maxHealthForLevel(currentLevel) {
+  const tier = Math.floor((currentLevel - 1) / 5);
+  return 100 + tier * 18;
 }
 
 function resize() {
@@ -103,7 +148,7 @@ function resetPlayerToCenter() {
 }
 
 function drawPlayer() {
-  const glow = ctx.createRadialGradient(player.x, player.y, 2, player.x, player.y, player.radius + 10);
+  const glow = ctx.createRadialGradient(player.x, player.y, 2, player.x, player.y, player.radius + 11);
   glow.addColorStop(0, "#8ec5ff");
   glow.addColorStop(1, "rgba(45,125,255,0)");
   ctx.fillStyle = glow;
@@ -127,7 +172,7 @@ function drawRed(red) {
     ctx.fillStyle = "#fff";
     ctx.font = "12px Arial";
     ctx.textAlign = "center";
-    ctx.fillText(`${red.hp}`, red.x, red.y + 4);
+    ctx.fillText(`${Math.ceil(red.hp)}`, red.x, red.y + 4);
   }
 }
 
@@ -135,6 +180,13 @@ function drawProjectile(projectile) {
   ctx.beginPath();
   ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2);
   ctx.fillStyle = projectile.color;
+  ctx.fill();
+}
+
+function drawEnemyProjectile(projectile) {
+  ctx.beginPath();
+  ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2);
+  ctx.fillStyle = "#ff9e5e";
   ctx.fill();
 }
 
@@ -170,11 +222,15 @@ function distanceSquared(ax, ay, bx, by) {
   return dx * dx + dy * dy;
 }
 
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
+}
+
 function spawnRed() {
   const config = levelConfig(level);
-  const radius = config.radiusMin + Math.random() * (config.radiusMax - config.radiusMin);
-  const speed = config.speedMin + Math.random() * (config.speedMax - config.speedMin);
-  const hp = Math.floor(config.hpMin + Math.random() * (config.hpMax - config.hpMin + 1));
+  const radius = randomBetween(config.radiusMin, config.radiusMax);
+  const speed = randomBetween(config.speedMin, config.speedMax);
+  const hp = Math.floor(randomBetween(config.hpMin, config.hpMax + 1));
   const minDistance = config.isBossLevel ? 260 : 180;
   const minDistanceSq = minDistance * minDistance;
 
@@ -187,10 +243,29 @@ function spawnRed() {
     attempts += 1;
   } while (attempts < 30 && distanceSquared(x, y, player.x, player.y) < minDistanceSq);
 
-  reds.push({ x, y, radius, speed, hp, ageSeconds: 0, isBoss: config.isBossLevel });
+  const canShoot = Math.random() < config.shooterChance;
+  reds.push({
+    x,
+    y,
+    radius,
+    speed,
+    hp,
+    armor: config.armor,
+    ageSeconds: 0,
+    isBoss: config.isBossLevel,
+    canShoot,
+    shotCooldownMs: randomBetween(config.enemyShotCooldownMinMs, config.enemyShotCooldownMaxMs),
+  });
 }
 
-function updateReds(deltaSeconds) {
+function damagePlayer(amount) {
+  player.health = Math.max(0, player.health - amount);
+  if (player.health <= 0) {
+    gameOver = true;
+  }
+}
+
+function updateReds(deltaSeconds, deltaMs) {
   if (gameOver || paused) return;
 
   const config = levelConfig(level);
@@ -204,6 +279,14 @@ function updateReds(deltaSeconds) {
     red.x += (toPlayerX / len) * red.speed * deltaSeconds;
     red.y += (toPlayerY / len) * red.speed * deltaSeconds;
 
+    if (red.canShoot) {
+      red.shotCooldownMs -= deltaMs;
+      if (red.shotCooldownMs <= 0) {
+        fireEnemyProjectile(red, config);
+        red.shotCooldownMs = randomBetween(config.enemyShotCooldownMinMs, config.enemyShotCooldownMaxMs);
+      }
+    }
+
     if (!red.isBoss && red.ageSeconds >= config.dodgeLifetime) {
       reds.splice(i, 1);
       player.credits += 1;
@@ -211,9 +294,33 @@ function updateReds(deltaSeconds) {
   }
 }
 
+function fireEnemyProjectile(red, config) {
+  const dx = player.x - red.x;
+  const dy = player.y - red.y;
+  const len = Math.hypot(dx, dy) || 1;
+
+  enemyProjectiles.push({
+    x: red.x,
+    y: red.y,
+    vx: (dx / len) * config.enemyShotSpeed,
+    vy: (dy / len) * config.enemyShotSpeed,
+    radius: red.isBoss ? 5 : 4,
+    damage: config.enemyShotDamage,
+    ttl: 3,
+  });
+}
+
+function getWeaponById(id) {
+  return weapons.find((weapon) => weapon.id === id) || null;
+}
+
+function getWeaponByKey(key) {
+  return weapons.find((weapon) => weapon.key === key) || null;
+}
+
 function fireAtNearestEnemy() {
-  if (gameOver || paused || !equippedWeaponKey || reds.length === 0) return;
-  const weapon = weapons[equippedWeaponKey];
+  if (gameOver || paused || !equippedWeaponId || reds.length === 0) return;
+  const weapon = getWeaponById(equippedWeaponId);
   if (!weapon || fireCooldownMs > 0) return;
   if (!keysDown[" "] && !keysDown.Space && !keysDown.space) return;
 
@@ -240,7 +347,7 @@ function fireAtNearestEnemy() {
     damage: weapon.damage,
     radius: 4,
     color: weapon.color,
-    ttl: 1.6,
+    ttl: 1.8,
   });
 
   fireCooldownMs = weapon.cooldownMs;
@@ -271,11 +378,13 @@ function updateProjectiles(deltaSeconds) {
       const red = reds[r];
       const sumR = red.radius + projectile.radius;
       if (distanceSquared(projectile.x, projectile.y, red.x, red.y) < sumR * sumR) {
-        red.hp -= projectile.damage;
+        const effectiveDamage = Math.max(0.5, projectile.damage - red.armor * 0.3);
+        red.hp -= effectiveDamage;
         hit = true;
+
         if (red.hp <= 0) {
           reds.splice(r, 1);
-          player.credits += red.isBoss ? 20 + Math.floor(level / 5) * 5 : 2;
+          player.credits += red.isBoss ? 22 + currentBossTier() * 6 : 2;
         }
         break;
       }
@@ -285,35 +394,75 @@ function updateProjectiles(deltaSeconds) {
   }
 }
 
+function updateEnemyProjectiles(deltaSeconds) {
+  if (paused || gameOver) return;
+
+  for (let i = enemyProjectiles.length - 1; i >= 0; i -= 1) {
+    const projectile = enemyProjectiles[i];
+    projectile.ttl -= deltaSeconds;
+    projectile.x += projectile.vx * deltaSeconds;
+    projectile.y += projectile.vy * deltaSeconds;
+
+    if (
+      projectile.ttl <= 0 ||
+      projectile.x < -20 ||
+      projectile.y < -20 ||
+      projectile.x > canvas.width + 20 ||
+      projectile.y > canvas.height + 20
+    ) {
+      enemyProjectiles.splice(i, 1);
+      continue;
+    }
+
+    const sumR = projectile.radius + player.radius;
+    if (distanceSquared(projectile.x, projectile.y, player.x, player.y) < sumR * sumR) {
+      damagePlayer(projectile.damage);
+      enemyProjectiles.splice(i, 1);
+    }
+  }
+}
+
 function checkCollisions() {
   if (gameOver || paused) return;
-  for (const red of reds) {
+
+  const config = levelConfig(level);
+  for (let i = reds.length - 1; i >= 0; i -= 1) {
+    const red = reds[i];
     const sumR = red.radius + player.radius;
     if (distanceSquared(red.x, red.y, player.x, player.y) < sumR * sumR) {
-      gameOver = true;
-      break;
+      damagePlayer(config.enemyContactDamage);
+      if (!red.isBoss) {
+        reds.splice(i, 1);
+      }
     }
   }
 }
 
 function tryUnlockWeapons() {
-  if (!weaponsUnlocked && scoreSeconds >= 5) weaponsUnlocked = true;
+  if (!weaponsUnlocked && scoreSeconds >= 5) {
+    weaponsUnlocked = true;
+  }
 }
 
 function tryBuyOrEquipWeapon(key) {
   if (!weaponsUnlocked || gameOver) return;
+  const weapon = getWeaponByKey(key);
+  if (!weapon) return;
 
-  const weaponEntry = Object.entries(weapons).find(([, weapon]) => weapon.key === key);
-  if (!weaponEntry) return;
+  if (bossesDefeated < weapon.unlockTier) return;
 
-  const [weaponId, weapon] = weaponEntry;
-  if (!purchasedWeapons.has(weaponId)) {
+  if (!purchasedWeapons.has(weapon.id)) {
     if (player.credits < weapon.cost) return;
     player.credits -= weapon.cost;
-    purchasedWeapons.add(weaponId);
+    purchasedWeapons.add(weapon.id);
   }
 
-  equippedWeaponKey = weaponId;
+  equippedWeaponId = weapon.id;
+}
+
+function resetHealthForLevel() {
+  player.maxHealth = maxHealthForLevel(level);
+  player.health = player.maxHealth;
 }
 
 function updateLevelFlow(deltaMs) {
@@ -325,6 +474,7 @@ function updateLevelFlow(deltaMs) {
       inLevelTransition = false;
       spawnTimer = 0;
       spawnedThisLevel = 0;
+      resetHealthForLevel();
     }
     return;
   }
@@ -340,11 +490,64 @@ function updateLevelFlow(deltaMs) {
   }
 
   if (spawnedThisLevel >= config.spawnCount && reds.length === 0) {
+    if (isBossLevel(level)) {
+      bossesDefeated += 1;
+    }
+
     level += 1;
     inLevelTransition = true;
-    transitionTimer = isBossLevel(level) ? 2400 : 1300;
+    transitionTimer = isBossLevel(level) ? 2500 : 1400;
     spawnTimer = 0;
     spawnedThisLevel = 0;
+    projectiles.length = 0;
+    enemyProjectiles.length = 0;
+  }
+}
+
+function updateWeaponPanel() {
+  weaponRows.innerHTML = "";
+
+  for (const weapon of weapons) {
+    const row = document.createElement("tr");
+
+    const statusCell = document.createElement("td");
+    statusCell.textContent = "";
+
+    let statusText = "Locked";
+    let statusClass = "weapon-locked";
+
+    if (!weaponsUnlocked) {
+      statusText = "Unlock at 5s";
+    } else if (bossesDefeated < weapon.unlockTier) {
+      statusText = `Unlock after Boss ${weapon.unlockTier}`;
+    } else if (purchasedWeapons.has(weapon.id)) {
+      statusText = equippedWeaponId === weapon.id ? "Equipped" : "Owned";
+      statusClass = equippedWeaponId === weapon.id ? "weapon-equipped" : "weapon-available";
+    } else if (player.credits >= weapon.cost) {
+      statusText = "Affordable";
+      statusClass = "weapon-available";
+    } else {
+      statusText = "Need credits";
+    }
+
+    const cells = [
+      weapon.key,
+      weapon.name,
+      `${weapon.cost}`,
+      `${weapon.damage}`,
+      `${(1000 / weapon.cooldownMs).toFixed(1)}/s`,
+    ];
+
+    for (const value of cells) {
+      const td = document.createElement("td");
+      td.textContent = value;
+      row.appendChild(td);
+    }
+
+    statusCell.textContent = statusText;
+    statusCell.className = statusClass;
+    row.appendChild(statusCell);
+    weaponRows.appendChild(row);
   }
 }
 
@@ -352,19 +555,23 @@ function updateUiText() {
   uiTime.textContent = `${scoreSeconds.toFixed(1)}s`;
   uiLevel.textContent = `${level}${isBossLevel(level) ? " (Boss)" : ""}`;
   uiCredits.textContent = `${player.credits}`;
-  uiWeapon.textContent = weaponsUnlocked
-    ? equippedWeaponKey
-      ? `${weapons[equippedWeaponKey].name}`
-      : "None equipped"
-    : "Locked";
+
+  const weapon = getWeaponById(equippedWeaponId);
+  uiWeapon.textContent = weaponsUnlocked ? (weapon ? weapon.name : "None equipped") : "Locked";
+
+  uiHealthText.textContent = `${Math.ceil(player.health)} / ${player.maxHealth}`;
+  const pct = Math.max(0, Math.min(100, (player.health / player.maxHealth) * 100));
+  uiHealthFill.style.width = `${pct}%`;
 
   if (paused) {
     uiHint.textContent = "Paused — press Esc to resume.";
   } else if (!weaponsUnlocked) {
     uiHint.textContent = "Survive 5s to unlock weapon purchases.";
   } else {
-    uiHint.textContent = "Buy/equip: 1 Pulse(4), 2 Burst(10), 3 Rail(18). Hold Space to fire.";
+    uiHint.textContent = "Press 1-9 to buy/equip weapons. Hold Space to fire. Bosses every 5 levels increase enemy armor + firepower.";
   }
+
+  updateWeaponPanel();
 }
 
 function drawOverlayMessage() {
@@ -377,11 +584,7 @@ function drawOverlayMessage() {
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.font = "bold 40px Arial";
-    ctx.fillText(
-      isBossLevel(level) ? `BOSS LEVEL ${level}` : `Level ${level}`,
-      canvas.width / 2,
-      canvas.height / 2,
-    );
+    ctx.fillText(isBossLevel(level) ? `BOSS LEVEL ${level}` : `Level ${level}`, canvas.width / 2, canvas.height / 2);
   }
 
   if (paused && !gameOver) {
@@ -406,24 +609,32 @@ function drawOverlayMessage() {
 function restartGame() {
   reds.length = 0;
   projectiles.length = 0;
+  enemyProjectiles.length = 0;
+
   gameOver = false;
   paused = false;
   hasRecordedGameOver = false;
   pauseStartedAt = 0;
   totalPausedMs = 0;
+
   scoreSeconds = 0;
   startTime = performance.now();
+
   level = 1;
+  bossesDefeated = 0;
   inLevelTransition = false;
   transitionTimer = 0;
   spawnTimer = 0;
   spawnedThisLevel = 0;
+
   player.credits = 0;
   weaponsUnlocked = false;
   purchasedWeapons.clear();
-  equippedWeaponKey = null;
+  equippedWeaponId = null;
   fireCooldownMs = 0;
+
   resetPlayerToCenter();
+  resetHealthForLevel();
 }
 
 function sortBestTimes(times) {
@@ -459,12 +670,15 @@ function formatScore(timeSeconds) {
 
 function renderLeaderboard() {
   leaderboardRows.innerHTML = "";
+
   for (let i = 0; i < leaderboardLimit; i += 1) {
     const row = document.createElement("tr");
     const sessionCell = document.createElement("td");
     const overallCell = document.createElement("td");
+
     sessionCell.textContent = formatScore(sessionBestTimes[i]);
     overallCell.textContent = formatScore(overallBestTimes[i]);
+
     row.appendChild(sessionCell);
     row.appendChild(overallCell);
     leaderboardRows.appendChild(row);
@@ -508,12 +722,15 @@ function loop(now) {
 
   if (!paused) {
     fireCooldownMs = Math.max(0, fireCooldownMs - deltaMs);
+
     updatePlayer(deltaSeconds);
     tryUnlockWeapons();
     updateLevelFlow(deltaMs);
+
     fireAtNearestEnemy();
     updateProjectiles(deltaSeconds);
-    updateReds(deltaSeconds);
+    updateEnemyProjectiles(deltaSeconds);
+    updateReds(deltaSeconds, deltaMs);
     checkCollisions();
   }
 
@@ -526,6 +743,8 @@ function loop(now) {
   drawPlayer();
   reds.forEach(drawRed);
   projectiles.forEach(drawProjectile);
+  enemyProjectiles.forEach(drawEnemyProjectile);
+
   updateUiText();
   drawOverlayMessage();
 
@@ -541,7 +760,7 @@ window.addEventListener("keydown", (event) => {
     togglePause(performance.now());
   }
 
-  if (key === "1" || key === "2" || key === "3") {
+  if (/^[1-9]$/.test(key)) {
     tryBuyOrEquipWeapon(key);
   }
 
@@ -559,6 +778,7 @@ window.addEventListener("resize", resize);
 
 renderLeaderboard();
 resize();
+resetHealthForLevel();
 updateUiText();
 requestAnimationFrame((time) => {
   lastTime = time;

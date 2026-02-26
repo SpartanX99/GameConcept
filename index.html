@@ -17,7 +17,35 @@
         <span>Credits</span><strong id="uiCredits">0</strong>
         <span>Weapon</span><strong id="uiWeapon">Locked</strong>
       </div>
+
+      <div class="health-wrap">
+        <div class="health-header">
+          <span>Health</span>
+          <strong id="uiHealthText">100 / 100</strong>
+        </div>
+        <div class="health-track" role="progressbar" aria-label="Player health">
+          <div id="uiHealthFill" class="health-fill"></div>
+        </div>
+      </div>
+
       <p id="uiHint">Survive 5s to unlock weapon purchases.</p>
+
+      <div class="weapons-panel">
+        <h2>Armory</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Key</th>
+              <th>Weapon</th>
+              <th>Cost</th>
+              <th>Power</th>
+              <th>Rate</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="weaponRows"></tbody>
+        </table>
+      </div>
     </section>
 
     <aside class="leaderboard" aria-label="Leaderboard">

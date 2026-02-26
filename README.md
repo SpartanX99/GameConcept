@@ -60,15 +60,17 @@ Also make sure your terminal is not including literal `\n` characters at the end
 
 - Move: `WASD` or Arrow keys
 - Unlock weapons after 5 seconds of survival
-- Buy/equip weapons: `1`, `2`, `3`
+- Buy/equip weapons: `1` to `9` (see Armory table in HUD)
 - Fire equipped weapon: hold `Space`
 - Pause/Resume: `Esc`
 - Restart after game over: `R`
 
 ## Gameplay additions
 
-- **Credits**: gain `+1` per red dot dodged, extra credits for kills.
-- **Weapons**: spend credits to buy stronger weapons.
+- **Credits**: gain `+1` per red dot dodged, plus bonus credits for kills.
+- **Weapons**: expanded armory with 9 weapon options, readable stats table, and boss-tier unlocks.
 - **Levels**: continuous progression with increasing difficulty over time.
-- **Bosses**: every 5th level is a boss battle, and each boss scales up in difficulty.
+- **Bosses**: every 5th level is a boss battle, and each boss tier scales up in HP/armor/speed.
 - **Leaderboard**: tracks best times this session and best times overall.
+- **Enemy evolution**: after each boss tier, regular reds gain armor and more shooter behavior.
+- **Health system**: blue dot has a full health bar that resets each level.
